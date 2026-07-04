@@ -1,0 +1,36 @@
+# Rust
+/target/
+
+# Node
+node_modules/
+
+# Svelte/Vite build
+dist/
+build/
+
+# Tauri
+/src-tauri/target/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+
+# SvelteKit build
+.svelte-kit/
+
+# AI tools
+.agents/
+.claude/
+
+# 上游参考源码
+/Tai/
