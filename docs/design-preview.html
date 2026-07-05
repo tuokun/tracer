@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tracer · 仪表盘布局</title>
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+html{font-size:18px}
+body{background:#f0f0ec;padding:2rem;font-family:Segoe UI,sans-serif}
+h1{text-align:center;font-size:1.2rem;font-weight:600;margin-bottom:0.15rem;color:#1a1a1a;letter-spacing:-0.02em}
+.sub{text-align:center;color:#888;margin-bottom:1rem;font-size:0.65rem}
+.grid{display:grid;grid-template-columns:1fr;gap:1.2rem;max-width:820px;margin:0 auto}
+.card{background:#fff;box-shadow:0 2px 8px rgba(0,0,0,0.05);overflow:hidden;border:1px solid #e0dcf0}
+.card-body{padding:0.65rem 0.75rem}
+.card-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:0.3rem}
+.card-head .name{font-size:0.6rem;font-weight:600;letter-spacing:-0.01em;color:#5048E5}
+.card-head .tag{font-size:0.42rem;color:#999}
+
+/* base */
+.page{background:#fff;border:1px solid #e0dcf0;display:flex;min-height:230px;overflow:hidden}
+.sb{width:40px;background:#f8f6fe;border-right:1px solid #e0dcf0;flex-shrink:0;display:flex;flex-direction:column;align-items:center;padding:0.4rem 0}
+.sb .logo{font-size:0.7rem;font-weight:700;color:#5048E5;margin-bottom:0.4rem}
+.sb .ni{width:22px;height:22px;border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:0.55rem;color:#9a92c8;margin-bottom:3px}
+.sb .ni.act{background:rgba(80,72,229,0.08);color:#5048E5}
+.main{flex:1;overflow:hidden}
+
+/* ===== A: Time axis hero ===== */
+.db-a .main{padding:0.5rem}
+.db-a .hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:0.4rem}
+.db-a .hdr h2{font-size:0.65rem;font-weight:600;color:#1a1a32}
+.db-a .hdr .dt{font-size:0.4rem;color:#9a92c8}
+/* Time axis - featured large */
+.db-a .hero-axis{position:relative;padding:0.5rem 0.3rem;margin-bottom:0.5rem;background:#f8f6fe;border:1px solid #e0dcf0}
+.db-a .hero-axis::before{content:'';position:absolute;left:0.5rem;right:0.5rem;top:50%;height:1px;background:#d0ccf0}
+.db-a .hero-axis .lbls{display:flex}
+.db-a .hero-axis .lbls span{font-family:'JetBrains Mono',Consolas,monospace;font-size:0.4rem;color:#9a92c8;flex:1;transform:translateY(-0.4rem)}
+.db-a .hero-axis .now{position:absolute;left:62%;width:2px;height:1rem;background:#5048E5;top:50%;transform:translateY(-50%)}
+.db-a .hero-axis .now::before{content:'NOW';position:absolute;top:-0.65rem;left:50%;transform:translateX(-50%);font-size:0.38rem;color:#5048E5;font-weight:600;letter-spacing:0.06em}
+.db-a .hero-axis .now::after{content:'';position:absolute;bottom:-0.15rem;left:50%;transform:translateX(-50%);width:3px;height:3px;background:#5048E5;border-radius:50%}
+.db-a .hero-axis .current{position:absolute;left:62%;top:-0.65rem;transform:translateX(-50%);font-size:0.5rem;color:#1a1a32;font-weight:600;background:#f8f6fe;padding:0 0.3rem}
+.db-a .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:0.3rem;margin-bottom:0.4rem}
+.db-a .st{border:1px solid #e0dcf0;padding:0.25rem 0.35rem}
+.db-a .st .v{font-size:0.65rem;font-weight:600;color:#1a1a32;letter-spacing:-0.02em}
+.db-a .st .l{font-size:0.4rem;color:#6a62a0;margin-top:0.03rem}
+.db-a .btm{display:flex;gap:0.5rem}
+.db-a .ring{width:50px;height:50px;border-radius:50%;border:2px solid #e0dcf0;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:0.55rem;font-weight:600;color:#1a1a32}
+.db-a .list{flex:1}
+.db-a .list .i{display:flex;align-items:center;gap:0.3rem;padding:0.1rem 0}
+.db-a .list .nm{font-size:0.45rem;color:#1a1a32;width:48px}
+.db-a .list .bw{flex:1;height:2px;background:#e0dcf0;border-radius:1px}
+.db-a .list .bf{height:100%;background:#5048E5;border-radius:1px}
+.db-a .list .du{font-family:'JetBrains Mono',Consolas,monospace;font-size:0.42rem;color:#6a62a0;width:34px;text-align:right}
+
+/* ===== B: Stats-first hero ===== */
+.db-b .main{padding:0.5rem}
+.db-b .hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:0.4rem}
+.db-b .hdr h2{font-size:0.65rem;font-weight:600;color:#1a1a32}
+.db-b .hdr .dt{font-size:0.4rem;color:#9a92c8}
+.db-b .big-stat{display:grid;grid-template-columns:1fr 1fr;gap:0.4rem;margin-bottom:0.4rem}
+.db-b .big-stat .primary{background:#f8f6fe;border:1px solid #e0dcf0;padding:0.4rem 0.5rem}
+.db-b .big-stat .primary .num{font-size:1.2rem;font-weight:700;color:#1a1a32;letter-spacing:-0.03em;line-height:1}
+.db-b .big-stat .primary .num span{font-size:0.6rem;font-weight:400;color:#6a62a0;margin-left:0.2rem}
+.db-b .big-stat .primary .lbl{font-size:0.45rem;color:#6a62a0;margin-top:0.1rem}
+.db-b .big-stat .primary .chg{font-size:0.4rem;color:#4CAF50;margin-top:0.05rem}
+.db-b .big-stat .secondary{display:grid;grid-template-columns:1fr 1fr;gap:0.3rem}
+.db-b .big-stat .secondary .s{border:1px solid #e0dcf0;padding:0.3rem}
+.db-b .big-stat .secondary .s .v{font-size:0.55rem;font-weight:600;color:#1a1a32}
+.db-b .big-stat .secondary .s .l{font-size:0.38rem;color:#6a62a0;margin-top:0.03rem}
+.db-b .axis-sm{display:flex;margin-bottom:0.3rem;height:0.8rem;align-items:center;position:relative;padding:0 0.2rem}
+.db-b .axis-sm::before{content:'';position:absolute;left:0.2rem;right:0.2rem;top:50%;height:1px;background:#d0ccf0}
+.db-b .axis-sm span{font-size:0.35rem;color:#9a92c8;flex:1;transform:translateY(-0.3rem)}
+.db-b .axis-sm .now{position:absolute;left:62%;width:1.5px;height:0.6rem;background:#5048E5;top:50%;transform:translateY(-50%)}
+.db-b .list .i{display:flex;align-items:center;gap:0.3rem;padding:0.1rem 0}
+.db-b .list .nm{font-size:0.45rem;color:#1a1a32;width:48px}
+.db-b .list .bw{flex:1;height:2px;background:#e0dcf0;border-radius:1px}
+.db-b .list .bf{height:100%;background:#5048E5;border-radius:1px}
+.db-b .list .du{font-family:'JetBrains Mono',Consolas,monospace;font-size:0.42rem;color:#6a62a0;width:34px;text-align:right}
+
+/* ===== C: Heatmap hero ===== */
+.db-c .main{padding:0.5rem}
+.db-c .hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:0.35rem}
+.db-c .hdr h2{font-size:0.65rem;font-weight:600;color:#1a1a32}
+.db-c .hdr .dt{font-size:0.4rem;color:#9a92c8}
+.db-c .hm-hero{display:grid;grid-template-columns:repeat(24,1fr);grid-template-rows:repeat(3,1fr);gap:2px;aspect-ratio:8/1;margin-bottom:0.5rem}
+.db-c .hm-hero .c{background:#f0ecf8}
+.db-c .hm-hero .c.h{background:#5048E5}
+.db-c .hm-hero .c.m{background:rgba(80,72,229,0.5)}
+.db-c .hm-hero .c.l{background:rgba(80,72,229,0.2)}
+.db-c .axis-lbls{display:grid;grid-template-columns:repeat(25,1fr);margin-bottom:0.3rem}
+.db-c .axis-lbls span{font-family:'JetBrains Mono',Consolas,monospace;font-size:0.35rem;color:#9a92c8;text-align:center}
+.db-c .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:0.3rem;margin-bottom:0.3rem}
+.db-c .st{padding:0.3rem}
+.db-c .st .v{font-size:0.55rem;font-weight:600;color:#1a1a32}
+.db-c .st .l{font-size:0.38rem;color:#6a62a0;margin-top:0.03rem}
+.db-c .hm-sm{display:grid;grid-template-columns:repeat(24,1fr);gap:1px}
+.db-c .hm-sm .c{aspect-ratio:1;background:#f0ecf8}
+.db-c .hm-sm .c.on{background:#5048E5}
+
+/* ===== D: Current app hero ===== */
+.db-d .main{padding:0.5rem}
+.db-d .hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:0.4rem}
+.db-d .hdr h2{font-size:0.65rem;font-weight:600;color:#1a1a32}
+.db-d .hdr .dt{font-size:0.4rem;color:#9a92c8}
+.db-d .now-card{background:#f8f6fe;border:1px solid #e0dcf0;padding:0.4rem 0.5rem;margin-bottom:0.4rem;display:flex;justify-content:space-between;align-items:center}
+.db-d .now-card .left{}
+.db-d .now-card .left .app{font-size:0.65rem;font-weight:600;color:#1a1a32}
+.db-d .now-card .left .since{font-size:0.4rem;color:#6a62a0;margin-top:0.05rem}
+.db-d .now-card .right{text-align:right}
+.db-d .now-card .right .dur{font-family:'JetBrains Mono',Consolas,monospace;font-size:0.85rem;font-weight:600;color:#5048E5}
+.db-d .now-card .right .lbl{font-size:0.4rem;color:#6a62a0}
+.db-d .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:0.3rem;margin-bottom:0.4rem}
+.db-d .st{border:1px solid #e0dcf0;padding:0.25rem}
+.db-d .st .v{font-size:0.55rem;font-weight:600;color:#1a1a32}
+.db-d .st .l{font-size:0.38rem;color:#6a62a0;margin-top:0.03rem}
+.db-d .axis-sm{display:flex;margin-bottom:0.3rem;height:0.8rem;align-items:center;position:relative;padding:0 0.2rem}
+.db-d .axis-sm::before{content:'';position:absolute;left:0.2rem;right:0.2rem;top:50%;height:1px;background:#d0ccf0}
+.db-d .axis-sm span{font-size:0.35rem;color:#9a92c8;flex:1;transform:translateY(-0.3rem)}
+.db-d .axis-sm .now{position:absolute;left:62%;width:1.5px;height:0.6rem;background:#5048E5;top:50%;transform:translateY(-50%)}
+.db-d .list .i{display:flex;align-items:center;gap:0.3rem;padding:0.1rem 0}
+.db-d .list .nm{font-size:0.45rem;color:#1a1a32;width:48px}
+.db-d .list .bw{flex:1;height:2px;background:#e0dcf0;border-radius:1px}
+.db-d .list .bf{height:100%;background:#5048E5;border-radius:1px}
+.db-d .list .du{font-family:'JetBrains Mono',Consolas,monospace;font-size:0.42rem;color:#6a62a0;width:34px;text-align:right}
+
+/* ===== E: Timeline hero ===== */
+.db-e .main{padding:0.5rem}
+.db-e .hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:0.35rem}
+.db-e .hdr h2{font-size:0.65rem;font-weight:600;color:#1a1a32}
+.db-e .hdr .dt{font-size:0.4rem;color:#9a92c8}
+.db-e .tl{position:relative;padding-left:0.6rem;margin-bottom:0.4rem}
+.db-e .tl::before{content:'';position:absolute;left:0.15rem;top:0;bottom:0;width:1px;background:#d0ccf0}
+.db-e .tl .i{position:relative;padding:0.2rem 0 0.2rem 0.4rem;border-bottom:1px solid #f8f6fe}
+.db-e .tl .i::before{content:'';position:absolute;left:-0.5rem;top:0.3rem;width:4px;height:4px;border-radius:50%;background:#5048E5}
+.db-e .tl .i:first-child::before{background:#5048E5;width:6px;height:6px;left:-0.55rem;top:0.25rem}
+.db-e .tl .i .top{display:flex;justify-content:space-between}
+.db-e .tl .i .app{font-size:0.5rem;font-weight:500;color:#1a1a32}
+.db-e .tl .i .time{font-family:'JetBrains Mono',Consolas,monospace;font-size:0.4rem;color:#6a62a0}
+.db-e .tl .i .sub{font-size:0.38rem;color:#9a92c8;margin-top:0.02rem}
+.db-e .tl .i .dur-bar{height:2px;background:#e0dcf0;margin-top:0.15rem;border-radius:1px;overflow:hidden}
+.db-e .tl .i .dur-bar .f{height:100%;background:#5048E5;border-radius:1px}
+.db-e .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:0.3rem}
+.db-e .st{border:1px solid #e0dcf0;padding:0.25rem}
+.db-e .st .v{font-size:0.5rem;font-weight:600;color:#1a1a32}
+.db-e .st .l{font-size:0.38rem;color:#6a62a0}
+</style>
+</head>
+<body>
+
+<h1>Tracer · 仪表盘内容布局</h1>
+<p class="sub">第一眼看到什么？侧边栏统一为迷你模式</p>
+
+<div class="grid">
+
+<div class="card db-a">
+<div class="card-body">
+<div class="card-head"><span class="name">方案 A · 时间轴主导</span><span class="tag">顶部大时间轴 + NOW 指针 + 四格统计</span></div>
+<div class="page"><div class="sb"><div class="logo">T</div><div class="ni act">◉</div><div class="ni">⊞</div><div class="ni">◈</div><div class="ni">⚙</div></div><div class="main">
+<div class="hdr"><h2>今日概览</h2><span class="dt">7月5日 周日</span></div>
+<div class="hero-axis">
+<div class="lbls"><span>00</span><span>03</span><span>06</span><span>09</span><span>12</span><span>15</span><span>18</span><span>21</span></div>
+<div class="current">正在使用: Chrome</div>
+<div class="now"></div>
+</div>
+<div class="stats"><div class="st"><div class="v">6h 42m</div><div class="l">今日</div></div><div class="st"><div class="v">chrome</div><div class="l">最常用</div></div><div class="st"><div class="v">1h 15m</div><div class="l">空闲</div></div><div class="st"><div class="v">7</div><div class="l">应用</div></div></div>
+<div class="btm"><div class="ring">7</div><div class="list"><div class="i"><span class="nm">Chrome</span><div class="bw"><div class="bf" style="width:72%"></div></div><span class="du">2h18m</span></div><div class="i"><span class="nm">VS Code</span><div class="bw"><div class="bf" style="width:55%"></div></div><span class="du">1h45m</span></div><div class="i"><span class="nm">Spotify</span><div class="bw"><div class="bf" style="width:36%"></div></div><span class="du">1h09m</span></div></div></div>
+</div></div>
+<p style="margin-top:0.3rem;font-size:0.45rem;color:#999;line-height:1.4">Signature：顶部加宽时间轴，NOW 指针下标注"正在使用: Chrome"。一眼看到全天时间分布和当前状态。</p>
+</div>
+</div>
+
+<div class="card db-b">
+<div class="card-body">
+<div class="card-head"><span class="name">方案 B · 大数字主导</span><span class="tag">大号今日总时长 + 次要统计 + 时间轴缩略</span></div>
+<div class="page"><div class="sb"><div class="logo">T</div><div class="ni act">◉</div><div class="ni">⊞</div><div class="ni">◈</div><div class="ni">⚙</div></div><div class="main">
+<div class="hdr"><h2>今日概览</h2><span class="dt">7月5日 周日</span></div>
+<div class="big-stat"><div class="primary"><div class="num">6h 42m<span>+12%</span></div><div class="lbl">今日使用总时长</div><div class="chg">↑ 比昨日多 45 分钟</div></div><div class="secondary"><div class="s"><div class="v">chrome</div><div class="l">最常用</div></div><div class="s"><div class="v">7</div><div class="l">应用数</div></div><div class="s"><div class="v">1h15m</div><div class="l">空闲</div></div><div class="s"><div class="v">3</div><div class="l">时段数</div></div></div></div>
+<div class="axis-sm"><span>00</span><span>06</span><span>12</span><span>18</span><div class="now"></div></div>
+<div class="list"><div class="i"><span class="nm">Chrome</span><div class="bw"><div class="bf" style="width:72%"></div></div><span class="du">2h18m</span></div><div class="i"><span class="nm">VS Code</span><div class="bw"><div class="bf" style="width:55%"></div></div><span class="du">1h45m</span></div><div class="i"><span class="nm">Spotify</span><div class="bw"><div class="bf" style="width:36%"></div></div><span class="du">1h09m</span></div></div>
+</div></div>
+<p style="margin-top:0.3rem;font-size:0.45rem;color:#999;line-height:1.4">Signature：超大今日使用时长数字（1.2rem 粗体），配合同比变化。强调「量」的感知。</p>
+</div>
+</div>
+
+<div class="card db-c">
+<div class="card-body">
+<div class="card-head"><span class="name">方案 C · 热力图主导</span><span class="tag">大面积 24h 热力图作为视觉主体</span></div>
+<div class="page"><div class="sb"><div class="logo">T</div><div class="ni act">◉</div><div class="ni">⊞</div><div class="ni">◈</div><div class="ni">⚙</div></div><div class="main">
+<div class="hdr"><h2>今日时间地貌</h2><span class="dt">7月5日 周日</span></div>
+<div class="hm-hero"><div class="c"></div><div class="c"></div><div class="c l"></div><div class="c l"></div><div class="c m"></div><div class="c h"></div><div class="c h"></div><div class="c m"></div><div class="c h"></div><div class="c h"></div><div class="c m"></div><div class="c l"></div><div class="c"></div><div class="c l"></div><div class="c m"></div><div class="c m"></div><div class="c h"></div><div class="c h"></div><div class="c m"></div><div class="c"></div><div class="c"></div><div class="c"></div><div class="c"></div><div class="c"></div>
+<div class="c l"></div><div class="c l"></div><div class="c"></div><div class="c"></div><div class="c"></div><div class="c h"></div><div class="c h"></div><div class="c m"></div><div class="c m"></div><div class="c h"></div><div class="c h"></div><div class="c l"></div><div class="c"></div><div class="c"></div><div class="c l"></div><div class="c"></div><div class="c m"></div><div class="c h"></div><div class="c h"></div><div class="c m"></div><div class="c l"></div><div class="c"></div><div class="c"></div><div class="c"></div>
+<div class="c"></div><div class="c"></div><div class="c"></div><div class="c"></div><div class="c m"></div><div class="c m"></div><div class="c h"></div><div class="c m"></div><div class="c m"></div><div class="c h"></div><div class="c h"></div><div class="c l"></div><div class="c l"></div><div class="c"></div><div class="c"></div><div class="c"></div><div class="c m"></div><div class="c h"></div><div class="c h"></div><div class="c m"></div><div class="c l"></div><div class="c"></div><div class="c"></div><div class="c"></div></div>
+<div class="axis-lbls"><span></span><span>0</span><span></span><span></span><span>4</span><span></span><span></span><span>8</span><span></span><span></span><span>12</span><span></span><span></span><span>16</span><span></span><span></span><span>20</span><span></span><span></span><span>24</span><span></span><span></span><span></span><span></span><span></span></div>
+<div class="stats"><div class="st"><div class="v">6h 42m</div><div class="l">总使用</div></div><div class="st"><div class="v">7</div><div class="l">应用数</div></div><div class="st"><div class="v">5</div><div class="l">活跃时段</div></div></div>
+<div class="hm-sm"><div class="c on"></div><div class="c on"></div><div class="c"></div><div class="c"></div><div class="c on"></div><div class="c on"></div><div class="c on"></div><div class="c"></div><div class="c"></div><div class="c on"></div><div class="c on"></div><div class="c on"></div><div class="c"></div><div class="c"></div><div class="c on"></div><div class="c on"></div><div class="c on"></div><div class="c on"></div><div class="c"></div><div class="c"></div><div class="c on"></div><div class="c on"></div><div class="c"></div><div class="c"></div></div>
+</div></div>
+<p style="margin-top:0.3rem;font-size:0.45rem;color:#999;line-height:1.4">Signature：热力图作为视觉主体占据上半区域，以颜色密度呈现一天的「时间地貌」。UI 极简到几乎隐形。</p>
+</div>
+</div>
+
+<div class="card db-d">
+<div class="card-body">
+<div class="card-head"><span class="name">方案 D · 当前应用主导</span><span class="tag">突出当前前台应用 + 实时计时器</span></div>
+<div class="page"><div class="sb"><div class="logo">T</div><div class="ni act">◉</div><div class="ni">⊞</div><div class="ni">◈</div><div class="ni">⚙</div></div><div class="main">
+<div class="hdr"><h2>仪表盘</h2><span class="dt">7月5日 周日</span></div>
+<div class="now-card"><div class="left"><div class="app">Google Chrome</div><div class="since">自 14:23 开始使用</div></div><div class="right"><div class="dur">00:42:18</div><div class="lbl">当前段时长</div></div></div>
+<div class="stats"><div class="st"><div class="v">6h 42m</div><div class="l">今日总使用</div></div><div class="st"><div class="v">2h 18m</div><div class="l">Chrome 今日</div></div><div class="st"><div class="v">7</div><div class="l">应用数</div></div></div>
+<div class="axis-sm"><span>00</span><span>06</span><span>12</span><span>18</span><div class="now"></div></div>
+<div class="list"><div class="i"><span class="nm">VS Code</span><div class="bw"><div class="bf" style="width:55%"></div></div><span class="du">1h45m</span></div><div class="i"><span class="nm">Spotify</span><div class="bw"><div class="bf" style="width:36%"></div></div><span class="du">1h09m</span></div></div>
+</div></div>
+<p style="margin-top:0.3rem;font-size:0.45rem;color:#999;line-height:1.4">Signature：顶部突出显示「当前正在使用」的应用 + 实时计时器，强调「此刻」的感知。适合常开仪表盘当状态面板用的用户。</p>
+</div>
+</div>
+
+<div class="card db-e">
+<div class="card-body">
+<div class="card-head"><span class="name">方案 E · 时间线主导</span><span class="tag">今日应用切换时间线 + 时长条</span></div>
+<div class="page"><div class="sb"><div class="logo">T</div><div class="ni act">◉</div><div class="ni">⊞</div><div class="ni">◈</div><div class="ni">⚙</div></div><div class="main">
+<div class="hdr"><h2>今日时间线</h2><span class="dt">7月5日 周日</span></div>
+<div class="tl">
+<div class="i"><div class="top"><span class="app">Google Chrome</span><span class="time">14:23 — 现在</span></div><div class="sub">2 个标签页活跃</div><div class="dur-bar"><div class="f" style="width:100%"></div></div></div>
+<div class="i"><div class="top"><span class="app">Visual Studio Code</span><span class="time">12:35 — 14:23</span></div><div class="sub">tracer/src/core/</div><div class="dur-bar"><div class="f" style="width:65%"></div></div></div>
+<div class="i"><div class="top"><span class="app">Spotify</span><span class="time">11:00 — 12:35</span></div><div class="sub">背景播放中</div><div class="dur-bar"><div class="f" style="width:45%"></div></div></div>
+<div class="i"><div class="top"><span class="app">Windows Terminal</span><span class="time">10:15 — 11:00</span></div><div class="sub">git 操作</div><div class="dur-bar"><div class="f" style="width:25%"></div></div></div>
+</div>
+<div class="stats"><div class="st"><div class="v">6h 42m</div><div class="l">总计</div></div><div class="st"><div class="v">4</div><div class="l">段数</div></div><div class="st"><div class="v">chrome</div><div class="l">最多</div></div></div>
+</div></div>
+<p style="margin-top:0.3rem;font-size:0.45rem;color:#999;line-height:1.4">Signature：按时间顺序列出今天每个应用的使用时段，类似一篇文章的目录。最左侧圆点指示时间线，当前应用圆点放大。</p>
+</div>
+</div>
+
+</div>
+
+<p style="text-align:center;margin-top:1.2rem;color:#aaa;font-size:0.5rem">侧边栏统一为迷你模式 + 靛蓝 #5048E5</p>
+</body>
+</html>

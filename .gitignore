@@ -31,6 +31,7 @@ Thumbs.db
 # AI tools
 .agents/
 .claude/
+.gitnexus/
 
 # 上游参考源码
 /Tai/

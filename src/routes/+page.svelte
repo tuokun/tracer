@@ -1,156 +1,280 @@
 <script lang="ts">
-  import { invoke } from "@tauri-apps/api/core";
+  import { onMount } from 'svelte';
+  import Chart from '$lib/components/Chart.svelte';
+  import { getTodaySummary, getCurrentSession, getAppRank, getAppIcon, getHourlyHeatmap } from '$lib/api/commands';
+  import { formatDuration, formatTimer, todayTimestamp } from '$lib/utils/time';
+  import { CATEGORY_COLORS } from '$lib/utils/colors';
+  import type { TodaySummary, CurrentSession, AppRankItem } from '$lib/api/types';
 
-  let name = $state("");
-  let greetMsg = $state("");
+  let summary = $state<TodaySummary | null>(null);
+  let session = $state<CurrentSession | null>(null);
+  let rank = $state<AppRankItem[]>([]);
+  let heatData = $state<number[]>([]);
+  let timerDisplay = $state('00:00:00');
+  let nowLeft = $state(0);
+  let rankIcons = $state(new Map<string, string>());
 
-  async function greet(event: Event) {
-    event.preventDefault();
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    greetMsg = await invoke("greet", { name });
+  let timerInterval: ReturnType<typeof setInterval> | undefined;
+
+  let heatOptions = $derived(buildHeatOption(heatData));
+  let ringOptions = $derived(buildRingOption(rank));
+
+  onMount(() => {
+    loadData();
+    updateNowPosition();
+    timerInterval = setInterval(() => {
+      if (session) {
+        const dur = Math.floor(Date.now() / 1000) - session.start_timestamp;
+        timerDisplay = formatTimer(dur);
+      }
+    }, 1000);
+    const posInterval = setInterval(updateNowPosition, 60000);
+    return () => { clearInterval(timerInterval); clearInterval(posInterval); };
+  });
+
+  function updateNowPosition() {
+    const now = new Date();
+    nowLeft = (now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds()) / 864;
+  }
+
+  async function loadData() {
+    const ts = todayTimestamp();
+    summary = await getTodaySummary();
+    session = await getCurrentSession();
+    if (session) {
+      const dur = Math.floor(Date.now() / 1000) - session.start_timestamp;
+      timerDisplay = formatTimer(dur);
+    }
+    [rank, heatData] = await Promise.all([
+      getAppRank(ts, 7),
+      getHourlyHeatmap(ts),
+    ]);
+    loadRankIcons();
+  }
+
+  async function loadRankIcons() {
+    const entries = rank.filter(r => r.executable_path && !rankIcons.has(r.process_name));
+    if (!entries.length) return;
+    const results = await Promise.allSettled(
+      entries.map(r => getAppIcon(r.executable_path!, r.process_name))
+    );
+    results.forEach((r, i) => {
+      if (r.status === 'fulfilled') {
+        rankIcons.set(entries[i].process_name, r.value);
+      }
+    });
+  }
+
+  function sessionStartLabel(): string {
+    if (!session) return '--:--';
+    const d = new Date(session.start_timestamp * 1000);
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  }
+
+  function sessionAppName(): string {
+    if (!session) return '—';
+    return session.display_name || session.process_name;
+  }
+
+  function buildHeatOption(data: number[]): Record<string, unknown> {
+    const hours = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
+    const maxVal = Math.max(...data, 1);
+    return {
+      grid: { left: 24, right: 4, top: 4, bottom: 20 },
+      xAxis: {
+        type: 'category', data: hours,
+        axisLabel: { fontSize: 8, color: '#9A92C8', interval: 2 },
+        axisLine: { show: false }, axisTick: { show: false },
+      },
+      yAxis: { show: false },
+      series: [{
+        type: 'bar', barWidth: 14,
+        data: data.map(v => v / 60),
+        itemStyle: {
+          color: (p: { value: number }) => {
+            const ratio = p.value / (maxVal / 60);
+            if (ratio < 0.2) return 'rgba(80,72,229,0.2)';
+            if (ratio < 0.5) return 'rgba(80,72,229,0.5)';
+            return '#5048E5';
+          },
+          borderRadius: [2, 2, 0, 0],
+        },
+      }],
+    };
+  }
+
+  function buildRingOption(items: AppRankItem[]): Record<string, unknown> {
+    if (!items.length) return {};
+    const colors = CATEGORY_COLORS;
+    return {
+      tooltip: { trigger: 'item', formatter: (p: { name: string; value: number }) => `${p.name}: ${formatDuration(p.value)}` },
+      series: [{
+        type: 'pie', radius: ['50%', '75%'], center: ['50%', '50%'],
+        data: items.map((item, i) => ({
+          name: item.display_name ?? item.process_name,
+          value: item.total_seconds,
+          itemStyle: { color: colors[i % colors.length] },
+        })),
+        label: { show: false },
+        emphasis: { label: { show: false } },
+      }],
+      graphic: [{
+        type: 'text', left: 'center', top: '43%',
+        style: { text: `${items.length}`, fill: '#5048E5', font: '600 20px "Segoe UI Variable Display", "Segoe UI", sans-serif', textAlign: 'center' },
+      }, {
+        type: 'text', left: 'center', top: '56%',
+        style: { text: '应用', fill: '#9A92C8', font: '400 8px "Segoe UI", sans-serif', textAlign: 'center' },
+      }],
+    };
   }
 </script>
 
-<main class="container">
-  <h1>Welcome to Tauri + Svelte</h1>
-
-  <div class="row">
-    <a href="https://vite.dev" target="_blank">
-      <img src="/vite.svg" class="logo vite" alt="Vite Logo" />
-    </a>
-    <a href="https://tauri.app" target="_blank">
-      <img src="/tauri.svg" class="logo tauri" alt="Tauri Logo" />
-    </a>
-    <a href="https://svelte.dev" target="_blank">
-      <img src="/svelte.svg" class="logo svelte-kit" alt="SvelteKit Logo" />
-    </a>
+<div class="page">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">仪表盘</h1>
+      <p class="page-desc">今日状态总览</p>
+    </div>
+    <div class="page-date">
+      {new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })}
+    </div>
   </div>
-  <p>Click on the Tauri, Vite, and SvelteKit logos to learn more.</p>
 
-  <form class="row" onsubmit={greet}>
-    <input id="greet-input" placeholder="Enter a name..." bind:value={name} />
-    <button type="submit">Greet</button>
-  </form>
-  <p>{greetMsg}</p>
-</main>
+  <div class="hero-card">
+    <div class="hero-left">
+      <div class="hero-app-name">{sessionAppName()}</div>
+      <div class="hero-since">自 {sessionStartLabel()} 开始使用</div>
+    </div>
+    <div class="hero-right">
+      <div class="hero-timer">{timerDisplay}</div>
+      <div class="hero-timer-label">当前段时长</div>
+    </div>
+  </div>
+
+  <div class="stats-row">
+    <div class="stat-card">
+      <div class="stat-value">{summary ? formatDuration(summary.total_seconds) : '-'}</div>
+      <div class="stat-label">今日使用</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">{summary?.most_used_app ?? '-'}</div>
+      <div class="stat-label">最常用</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">{summary ? formatDuration(summary.idle_seconds) : '-'}</div>
+      <div class="stat-label">空闲</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">{summary?.app_count ?? '-'}</div>
+      <div class="stat-label">应用数</div>
+    </div>
+  </div>
+
+  <div class="card p-3 mt-4">
+    <div class="panel-title">时间轴</div>
+    <div class="time-axis">
+      <div class="axis-line"></div>
+      <div class="axis-labels">
+        {#each ['00','03','06','09','12','15','18','21'] as h}
+          <span class="axis-label">{h}</span>
+        {/each}
+      </div>
+      <div class="now-marker" style="left: {nowLeft}%">
+        <div class="now-dot"></div>
+        <div class="now-line"></div>
+        <div class="now-label">NOW</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid-2 mt-4">
+    <div class="card p-3">
+      <div class="panel-title">应用分布</div>
+      <Chart options={ringOptions} height={200} />
+    </div>
+    <div class="card p-3">
+      <div class="panel-title">应用排行</div>
+      <div class="rank-list">
+        {#each rank as item, i}
+          <div class="rank-item">
+            <span class="rank-num">{i + 1}</span>
+            <div class="rank-icon">
+              {#if rankIcons.get(item.process_name)}
+                <img src={rankIcons.get(item.process_name)} alt="" class="rank-icon-img" />
+              {:else}
+                <div class="app-icon-placeholder">{item.process_name[0].toUpperCase()}</div>
+              {/if}
+            </div>
+            <div class="rank-name">{item.display_name ?? item.process_name}</div>
+            <div class="rank-bar-wrap">
+              <div class="rank-bar" style="width: {item.percentage * 100}%"></div>
+            </div>
+            <div class="rank-time">{formatDuration(item.total_seconds)}</div>
+            {#if item.category_name}
+              <div class="rank-cat" style="background:{item.category_color ?? '#E0DCF0'}20;color:{item.category_color ?? '#6A62A0'}">
+                {item.category_name}
+              </div>
+            {/if}
+          </div>
+        {/each}
+        {#if rank.length === 0}
+          <div class="text-empty">暂无数据</div>
+        {/if}
+      </div>
+    </div>
+  </div>
+
+  <div class="card p-3 mt-4">
+    <div class="panel-title">24h 活动热力</div>
+    <Chart options={heatOptions} height={100} class="mt-2" />
+  </div>
+</div>
 
 <style>
-.logo.vite:hover {
-  filter: drop-shadow(0 0 2em #747bff);
-}
+  .page { max-width: 900px; }
 
-.logo.svelte-kit:hover {
-  filter: drop-shadow(0 0 2em #ff3e00);
-}
+  .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
 
-:root {
-  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
-  font-size: 16px;
-  line-height: 24px;
-  font-weight: 400;
+  .page-title { font-family: 'Segoe UI Variable Display','Segoe UI',sans-serif; font-weight: 600; font-size: 0.85rem; color: #1A1A32; margin: 0; }
+  .page-desc { font-family: 'Segoe UI',sans-serif; font-size: 0.5rem; color: #6A62A0; margin-top: 0.125rem; }
+  .page-date { font-family: 'Segoe UI',sans-serif; font-size: 0.5rem; color: #9A92C8; }
 
-  color: #0f0f0f;
-  background-color: #f6f6f6;
+  .hero-card { background:#F8F6FE; border:1px solid #E0DCF0; border-radius:4px; box-shadow:0 2px 8px rgba(0,0,0,0.05); display:flex; align-items:center; justify-content:space-between; padding:0.75rem; }
+  .hero-left { display:flex; flex-direction:column; gap:0.125rem; }
+  .hero-app-name { font-family:'Segoe UI Variable Display','Segoe UI',sans-serif; font-weight:600; font-size:1.2rem; color:#1A1A32; }
+  .hero-since { font-family:'Segoe UI',sans-serif; font-size:0.5rem; color:#6A62A0; }
+  .hero-right { display:flex; flex-direction:column; align-items:flex-end; gap:0.125rem; }
+  .hero-timer { font-family:'JetBrains Mono',monospace; font-weight:500; font-size:1.2rem; color:#5048E5; }
+  .hero-timer-label { font-family:'Segoe UI',sans-serif; font-size:0.5rem; color:#6A62A0; }
 
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  -webkit-text-size-adjust: 100%;
-}
+  .stats-row { display:grid; grid-template-columns:repeat(4,1fr); gap:0.75rem; margin-top:1rem; }
+  .stat-card { background:#F8F6FE; border:1px solid #E0DCF0; border-radius:4px; box-shadow:0 2px 8px rgba(0,0,0,0.05); display:flex; flex-direction:column; align-items:center; justify-content:center; padding:0.75rem 0.5rem; gap:0.125rem; }
+  .stat-value { font-family:'Segoe UI Variable Display','Segoe UI',sans-serif; font-weight:600; font-size:0.75rem; color:#1A1A32; }
+  .stat-label { font-family:'Segoe UI',sans-serif; font-size:0.5rem; color:#6A62A0; }
 
-.container {
-  margin: 0;
-  padding-top: 10vh;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  text-align: center;
-}
+  .panel-title { font-family:'Segoe UI Variable Display','Segoe UI',sans-serif; font-weight:600; font-size:0.5rem; color:#1A1A32; }
 
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: 0.75s;
-}
+  .time-axis { position:relative; margin-top:0.75rem; height:40px; }
+  .axis-line { position:absolute; top:12px; left:0; right:0; height:1px; background:#E0DCF0; }
+  .axis-labels { display:flex; justify-content:space-between; padding:0 0.25rem; position:absolute; top:8px; left:0; right:0; }
+  .axis-label { font-family:'JetBrains Mono',monospace; font-size:0.4rem; color:#9A92C8; }
+  .now-marker { position:absolute; top:0; transform:translateX(-50%); display:flex; flex-direction:column; align-items:center; transition:left 60s linear; }
+  .now-dot { width:6px; height:6px; border-radius:50%; background:#F5A623; }
+  .now-line { width:1px; height:28px; background:#F5A623; }
+  .now-label { font-family:'JetBrains Mono',monospace; font-size:0.4rem; color:#F5A623; font-weight:600; margin-top:1px; }
 
-.logo.tauri:hover {
-  filter: drop-shadow(0 0 2em #24c8db);
-}
+  .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:1rem; }
 
-.row {
-  display: flex;
-  justify-content: center;
-}
-
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-
-a:hover {
-  color: #535bf2;
-}
-
-h1 {
-  text-align: center;
-}
-
-input,
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  color: #0f0f0f;
-  background-color: #ffffff;
-  transition: border-color 0.25s;
-  box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
-}
-
-button {
-  cursor: pointer;
-}
-
-button:hover {
-  border-color: #396cd8;
-}
-button:active {
-  border-color: #396cd8;
-  background-color: #e8e8e8;
-}
-
-input,
-button {
-  outline: none;
-}
-
-#greet-input {
-  margin-right: 5px;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    color: #f6f6f6;
-    background-color: #2f2f2f;
-  }
-
-  a:hover {
-    color: #24c8db;
-  }
-
-  input,
-  button {
-    color: #ffffff;
-    background-color: #0f0f0f98;
-  }
-  button:active {
-    background-color: #0f0f0f69;
-  }
-}
-
+  .rank-list { display:flex; flex-direction:column; gap:0.25rem; margin-top:0.375rem; }
+  .rank-item { display:flex; align-items:center; gap:0.25rem; }
+  .rank-num { font-family:'JetBrains Mono',monospace; font-size:0.4rem; color:#9A92C8; width:12px; text-align:right; }
+  .rank-icon { width:18px; height:18px; flex-shrink:0; }
+  .rank-icon-img { width:18px; height:18px; border-radius:3px; }
+  .app-icon-placeholder { width:18px; height:18px; border-radius:3px; background:#E0DCF0; display:flex; align-items:center; justify-content:center; font-family:'Segoe UI',sans-serif; font-size:0.4rem; color:#9A92C8; }
+  .rank-name { font-family:'Segoe UI',sans-serif; font-weight:600; font-size:0.5rem; color:#1A1A32; width:55px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .rank-bar-wrap { flex:1; height:5px; background:#F0ECF8; border-radius:3px; overflow:hidden; }
+  .rank-bar { height:100%; background:#5048E5; border-radius:3px; transition:width 0.3s; }
+  .rank-time { font-family:'JetBrains Mono',monospace; font-size:0.45rem; color:#6A62A0; width:44px; text-align:right; }
+  .rank-cat { font-family:'Segoe UI',sans-serif; font-size:0.4rem; border-radius:4px; padding:0 0.25rem; white-space:nowrap; }
+  .text-empty { font-family:'Segoe UI',sans-serif; font-size:0.5rem; color:#9A92C8; text-align:center; padding:0.5rem 0; }
 </style>

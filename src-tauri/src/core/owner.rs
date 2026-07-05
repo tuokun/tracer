@@ -8,12 +8,14 @@
 //! - FlushTick → 读 idle+audio：`idle≥阈值 && !playing` 则整段丢弃，否则 checkpoint 落库并重置 start。
 //! - PowerSuspend → 落库后清段；PowerResume → 清段，等下次切换重建（已知小缺口，v1 接受）。
 
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use rusqlite::Connection;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tracing::{error, info};
 
+use crate::core::types::CurrentSession;
 use crate::core::{audio, config, db, event::Event, idle, repo};
 
 /// 当前正在计时的前台段。
@@ -23,7 +25,12 @@ struct Segment {
 }
 
 /// 在 Tauri 异步运行时上启动 owner task，串行消费所有事件。
-pub fn spawn(mut rx: UnboundedReceiver<Event>, conn: Connection) {
+/// `session_state` 供 Tauri 命令读取当前前台会话。
+pub fn spawn(
+    mut rx: UnboundedReceiver<Event>,
+    conn: Connection,
+    session_state: Arc<Mutex<Option<CurrentSession>>>,
+) {
     let cfg = config::load(&conn);
     if let Ok(n) = db::table_count(&conn) {
         info!(
@@ -74,7 +81,17 @@ pub fn spawn(mut rx: UnboundedReceiver<Event>, conn: Connection) {
                         }
                         match repo::upsert_app(&conn, &info.name, None, Some(&info.path)) {
                             Ok(app_id) => {
+                                let process_name = info.name.clone();
                                 current = Some(Segment { app_id, start: now });
+                                // 更新共享的 session state
+                                if let Ok(mut s) = session_state.lock() {
+                                    *s = Some(CurrentSession {
+                                        process_name,
+                                        display_name: None,
+                                        start_timestamp: now,
+                                        current_duration: 0,
+                                    });
+                                }
                                 info!(pid = info.pid, name = %info.name, peak = ?peak, "前台切换（已记录）");
                             }
                             Err(e) => {
@@ -94,6 +111,9 @@ pub fn spawn(mut rx: UnboundedReceiver<Event>, conn: Connection) {
                             }
                         }
                         current = None;
+                        if let Ok(mut s) = session_state.lock() {
+                            *s = None;
+                        }
                         info!("系统挂起（已落库，暂停计时）");
                     }
                     Some(Event::PowerResume) => {

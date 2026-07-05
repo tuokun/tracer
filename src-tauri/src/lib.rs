@@ -1,21 +1,185 @@
 mod core;
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
+use rusqlite::Connection;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Manager, WebviewUrl, WebviewWindowBuilder,
 };
+use tracing::info;
 
-/// 用户是否通过托盘「退出」主动请求退出（区别于关窗触发的 ExitRequested）。
-static SHOULD_QUIT: AtomicBool = AtomicBool::new(false);
+use core::types::*;
+use core::{db, repo};
 
-// Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
+/// 通用数据库连接（供 Tauri 命令查询和配置写入使用）。
+/// 计时落库由 owner task 独占其写连接，互不冲突（WAL 模式支持一写多读）。
+struct DbState {
+    conn: Mutex<Connection>,
 }
+
+/// 当前前台会话（由 owner task 实时更新）。
+struct SessionState {
+    inner: Arc<Mutex<Option<CurrentSession>>>,
+}
+
+/// 图标存储目录。
+struct IconDir {
+    path: std::path::PathBuf,
+}
+
+// ── Tauri Commands ──────────────────────────────
+
+#[tauri::command]
+fn get_today_summary(state: tauri::State<DbState>) -> Result<TodaySummary, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::get_today_summary(&conn).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_current_session(
+    db: tauri::State<DbState>,
+    session: tauri::State<SessionState>,
+) -> Result<CurrentSession, String> {
+    if let Ok(guard) = session.inner.lock() {
+        if let Some(mut sess) = guard.clone() {
+            sess.current_duration = chrono::Local::now().timestamp() - sess.start_timestamp;
+            // 尝试从 DB 补充 display_name
+            if sess.display_name.is_none() {
+                if let Ok(conn) = db.conn.lock() {
+                    sess.display_name = conn
+                        .query_row(
+                            "SELECT display_name FROM apps WHERE process_name=?1",
+                            rusqlite::params![sess.process_name],
+                            |r| r.get(0),
+                        )
+                        .ok()
+                        .flatten();
+                }
+            }
+            return Ok(sess);
+        }
+    }
+    Err("暂无前台会话".into())
+}
+
+#[tauri::command]
+fn get_app_rank(state: tauri::State<DbState>, date: i64, limit: Option<usize>) -> Result<Vec<AppRankItem>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::get_app_rank(&conn, date, limit.unwrap_or(10)).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_hourly_heatmap(state: tauri::State<DbState>, date: i64) -> Result<Vec<i64>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::get_hourly_heatmap(&conn, date).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_app_list(
+    state: tauri::State<DbState>,
+    search: Option<String>,
+    category_id: Option<i64>,
+    sort: Option<String>,
+) -> Result<Vec<AppItem>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::get_app_list(&conn, search.as_deref(), category_id, sort.as_deref()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_categories(state: tauri::State<DbState>) -> Result<Vec<CategoryItem>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::get_categories(&conn).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn save_category(
+    state: tauri::State<DbState>,
+    id: Option<i64>,
+    name: String,
+    color: Option<String>,
+    rules: Option<String>,
+) -> Result<i64, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::save_category(&conn, id, &name, color.as_deref(), rules.as_deref()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_category(state: tauri::State<DbState>, id: i64) -> Result<(), String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::delete_category(&conn, id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_stats_24h(state: tauri::State<DbState>, date: i64) -> Result<Vec<(String, Vec<i64>)>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::get_stats_24h(&conn, date).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_stats_radar(state: tauri::State<DbState>, start: i64, end: i64) -> Result<Vec<RadarPoint>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::get_stats_radar(&conn, start, end).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_stats_pie(state: tauri::State<DbState>, start: i64, end: i64) -> Result<Vec<PieSlice>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::get_stats_pie(&conn, start, end).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_stats_summary(state: tauri::State<DbState>, start: i64, end: i64) -> Result<StatsSummary, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::get_stats_summary(&conn, start, end).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn apply_category_rules(state: tauri::State<DbState>) -> Result<usize, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::apply_category_rules(&conn).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_config_value(state: tauri::State<DbState>, key: String, value: String) -> Result<(), String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::set_config(&conn, &key, &value).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_app_icon(
+    state: tauri::State<IconDir>,
+    exe_path: String,
+    process_name: String,
+) -> Result<String, String> {
+    use std::io::Read;
+    let path = core::iconer::extract(&exe_path, &state.path, &process_name)
+        .ok_or("无关联图标")?;
+    let mut f = std::fs::File::open(&path).map_err(|e| e.to_string())?;
+    let mut buf = Vec::new();
+    f.read_to_end(&mut buf).map_err(|e| e.to_string())?;
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&buf);
+    Ok(format!("data:image/png;base64,{b64}"))
+}
+
+#[tauri::command]
+fn get_config_value(state: tauri::State<DbState>, key: String) -> Result<Option<String>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let val: Option<String> = conn
+        .query_row(
+            "SELECT value FROM config WHERE key = ?1",
+            rusqlite::params![key],
+            |r| r.get(0),
+        )
+        .ok()
+        .flatten();
+    Ok(val)
+}
+
+/// 用户是否主动请求退出（区别于关窗触发的 ExitRequested）。
+static SHOULD_QUIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// 显示主窗口：已存在则聚焦，已被销毁则重建。
 fn show_main_window(app: &AppHandle) {
@@ -37,23 +201,58 @@ pub fn run() {
         .with_target(false)
         .init();
 
-    let app = tauri::Builder::default()
+    tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_autostart::init(Default::default(), None))
-        .invoke_handler(tauri::generate_handler![greet])
+        .invoke_handler(tauri::generate_handler![
+            get_today_summary,
+            get_current_session,
+            get_app_rank,
+            get_hourly_heatmap,
+            get_app_list,
+            get_categories,
+            save_category,
+            delete_category,
+            apply_category_rules,
+            get_stats_24h,
+            get_stats_radar,
+            get_stats_pie,
+            get_stats_summary,
+            set_config_value,
+            get_config_value,
+            get_app_icon,
+        ])
         .setup(|app| {
             let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<core::event::Event>();
 
-            // 数据库。
+            // 数据库（写连接归 owner task）。
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
-            let conn = core::db::open(&data_dir.join("tracer.db"))?;
-            core::owner::spawn(rx, conn);
+            let db_path = data_dir.join("tracer.db");
+            let write_conn = db::open(&db_path)?;
 
+            // 图标缓存目录。
+            let icon_dir = data_dir.join("icons");
+            std::fs::create_dir_all(&icon_dir)?;
+            app.manage(IconDir { path: icon_dir });
+
+            // 读连接（供 Tauri 命令使用）。
+            let read_conn = db::open(&db_path)?;
+            app.manage(DbState {
+                conn: Mutex::new(read_conn),
+            });
+
+            // 当前会话状态（owner task 写，Tauri 命令读）。
+            let session_state = Arc::new(Mutex::new(None::<CurrentSession>));
+            app.manage(SessionState {
+                inner: session_state.clone(),
+            });
+
+            core::owner::spawn(rx, write_conn, session_state);
             core::tracker::spawn(tx.clone());
             core::power::spawn(tx);
 
-            // 托盘菜单（只保留显示/退出；开机自启放在阶段四前端 UI）。
+            // 托盘菜单。
             let show = MenuItem::with_id(app, "show", "显示主窗口", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &quit])?;
@@ -64,7 +263,7 @@ pub fn run() {
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "show" => show_main_window(app),
                     "quit" => {
-                        SHOULD_QUIT.store(true, Ordering::SeqCst);
+                        SHOULD_QUIT.store(true, std::sync::atomic::Ordering::SeqCst);
                         app.exit(0);
                     }
                     _ => {}
@@ -81,16 +280,14 @@ pub fn run() {
                 })
                 .build(app)?;
 
+            info!("Tracer 启动完成");
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("error while building tauri application");
-
-    // 关窗后保持后台运行：窗口关闭触发 ExitRequested → 阻止退出（留托盘）。
-    // 但用户主动点托盘「退出」时放行（SHOULD_QUIT 已在退出按钮回调中置 true）。
-    app.run(|_handle, event| {
+        .expect("error while building tauri application")
+        .run(|_handle, event| {
         if let tauri::RunEvent::ExitRequested { api, .. } = event {
-            if !SHOULD_QUIT.load(Ordering::SeqCst) {
+            if !SHOULD_QUIT.load(std::sync::atomic::Ordering::SeqCst) {
                 api.prevent_exit();
             }
         }
