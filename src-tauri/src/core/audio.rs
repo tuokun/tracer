@@ -13,7 +13,6 @@ use windows::Win32::System::Com::{
 const PLAY_THRESHOLD: f32 = 1e-8;
 
 /// 默认渲染设备是否正在播放声音。任一步骤失败均返回 `false`，绝不 panic。
-#[allow(dead_code)] // 阶段二休眠判定接入（评审一·5）
 pub fn is_playing() -> bool {
     peak().map(|p| p > PLAY_THRESHOLD).unwrap_or(false)
 }

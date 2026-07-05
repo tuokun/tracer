@@ -1,46 +1,113 @@
-//! Owner task —— 计时与落库的唯一写者（Q4）。阶段一只结构化打印事件。
+//! Owner task —— 计时与落库的唯一写者（Q4）。
 //!
-//! 所有事件经 mpsc channel 串行进入此 task 处理，避免 hook 线程与 flush 兜底之间的竞态。
-//! 阶段二起在此消费事件、累加 `_appDuration`、写库。
+//! 所有事件经 mpsc channel 串行进入此 task；DB `Connection` 也归属此 task。
+//! 跨线程零共享可变状态，避免 hook 线程与 flush 兜底之间的竞态（评审一·6）。
+//!
+//! flush 语义（评审一·1、一·5）：
+//! - 切换窗口 → 当前段立即落库，开新段（切换=活跃，不做 idle 丢弃）。
+//! - FlushTick → 读 idle+audio：`idle≥阈值 && !playing` 则整段丢弃，否则 checkpoint 落库并重置 start。
+//! - PowerSuspend → 落库后清段；PowerResume → 清段，等下次切换重建（已知小缺口，v1 接受）。
 
 use std::time::Duration;
 
+use rusqlite::Connection;
 use tokio::sync::mpsc::UnboundedReceiver;
-use tracing::info;
+use tracing::{error, info};
 
-use crate::core::{event::Event, idle};
+use crate::core::{audio, config, db, event::Event, idle, repo};
+
+/// 当前正在计时的前台段。
+struct Segment {
+    app_id: i64,
+    start: i64, // unix 秒
+}
 
 /// 在 Tauri 异步运行时上启动 owner task，串行消费所有事件。
-pub fn spawn(mut rx: UnboundedReceiver<Event>) {
+pub fn spawn(mut rx: UnboundedReceiver<Event>, conn: Connection) {
+    let cfg = config::load(&conn);
+    if let Ok(n) = db::table_count(&conn) {
+        info!(
+            tables = n,
+            version = db::version(&conn).unwrap_or(0),
+            flush_interval_secs = cfg.flush_interval_secs,
+            "数据库就绪"
+        );
+    }
+
     tauri::async_runtime::spawn(async move {
-        // 阶段一验证用：每 30s 定时采样 idle（独立于输入，故能观测真实增长）。
-        // 阶段二此定时器演化为 FlushTick：到点读 idle_ms 判定整段丢弃 + 落库。
-        let mut idle_tick = tokio::time::interval(Duration::from_secs(30));
+        let idle_threshold_ms = cfg.idle_threshold_ms();
+        let mut current: Option<Segment> = None;
+        let mut flush_tick = tokio::time::interval(Duration::from_secs(cfg.flush_interval_secs));
+
         loop {
             tokio::select! {
-                _ = idle_tick.tick() => {
-                    info!(idle_ms = ?idle::idle_ms(), "idle 定时采样");
+                _ = flush_tick.tick() => {
+                    let idle = idle::idle_ms().unwrap_or(0);
+                    let playing = audio::is_playing();
+                    if let Some(seg) = current.as_mut() {
+                        let now = now_unix();
+                        let duration = now - seg.start;
+                        if duration > 0 {
+                            if idle >= idle_threshold_ms && !playing {
+                                info!(idle_ms = idle, dur = duration, "整段丢弃（空闲）");
+                            } else {
+                                match repo::add_duration(&conn, seg.app_id, seg.start, duration) {
+                                    Ok(()) => info!(idle_ms = idle, dur = duration, "flush 落库"),
+                                    Err(e) => error!(dur = duration, "flush 写库失败: {e}"),
+                                }
+                            }
+                            seg.start = now; // 丢弃或 checkpoint 后都重置起点
+                        }
+                    }
                 }
                 ev = rx.recv() => match ev {
-                    Some(ev) => log_event(ev),
+                    Some(Event::ForegroundChanged { info, peak }) => {
+                        let now = now_unix();
+                        // 切换 = 用户活跃，当前段一律落库。
+                        if let Some(seg) = current.as_mut() {
+                            let duration = now - seg.start;
+                            if duration > 0 {
+                                if let Err(e) = repo::add_duration(&conn, seg.app_id, seg.start, duration) {
+                                    error!("切换写库失败: {e}");
+                                }
+                            }
+                        }
+                        match repo::upsert_app(&conn, &info.name, None, Some(&info.path)) {
+                            Ok(app_id) => {
+                                current = Some(Segment { app_id, start: now });
+                                info!(pid = info.pid, name = %info.name, peak = ?peak, "前台切换（已记录）");
+                            }
+                            Err(e) => {
+                                error!("upsert_app 失败: {e}");
+                                current = None;
+                            }
+                        }
+                    }
+                    Some(Event::PowerSuspend) => {
+                        if let Some(seg) = current.as_mut() {
+                            let now = now_unix();
+                            let duration = now - seg.start;
+                            if duration > 0 {
+                                if let Err(e) = repo::add_duration(&conn, seg.app_id, seg.start, duration) {
+                                    error!("挂起写库失败: {e}");
+                                }
+                            }
+                        }
+                        current = None;
+                        info!("系统挂起（已落库，暂停计时）");
+                    }
+                    Some(Event::PowerResume) => {
+                        current = None; // 唤醒后等下一次前台切换重建段
+                        info!("系统恢复（恢复计时）");
+                    }
                     None => break,
                 }
             }
         }
+        drop(conn);
     });
 }
 
-fn log_event(ev: Event) {
-    match ev {
-        Event::ForegroundChanged { info, peak } => info!(
-            pid = info.pid,
-            name = %info.name,
-            path = %info.path,
-            peak = ?peak,
-            idle_ms = ?idle::idle_ms(),
-            "前台窗口切换"
-        ),
-        Event::PowerSuspend => info!("系统挂起（暂停计时）"),
-        Event::PowerResume => info!("系统恢复（恢复计时）"),
-    }
+fn now_unix() -> i64 {
+    chrono::Local::now().timestamp()
 }
