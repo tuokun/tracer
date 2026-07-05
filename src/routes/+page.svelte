@@ -3,7 +3,7 @@
   import Chart from '$lib/components/Chart.svelte';
   import { getTodaySummary, getCurrentSession, getAppRank, getAppIcon, getHourlyHeatmap } from '$lib/api/commands';
   import { formatDuration, formatTimer, todayTimestamp } from '$lib/utils/time';
-  import { CATEGORY_COLORS } from '$lib/utils/colors';
+  import { buildHeatOption, buildRingOption } from '$lib/charts/options';
   import type { TodaySummary, CurrentSession, AppRankItem } from '$lib/api/types';
 
   let summary = $state<TodaySummary | null>(null);
@@ -49,7 +49,7 @@
       getAppRank(ts, 7),
       getHourlyHeatmap(ts),
     ]);
-    loadRankIcons();
+    await loadRankIcons();
   }
 
   async function loadRankIcons() {
@@ -76,57 +76,6 @@
     return session.display_name || session.process_name;
   }
 
-  function buildHeatOption(data: number[]): Record<string, unknown> {
-    const hours = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
-    const maxVal = Math.max(...data, 1);
-    return {
-      grid: { left: 24, right: 4, top: 4, bottom: 20 },
-      xAxis: {
-        type: 'category', data: hours,
-        axisLabel: { fontSize: 8, color: '#9A92C8', interval: 2 },
-        axisLine: { show: false }, axisTick: { show: false },
-      },
-      yAxis: { show: false },
-      series: [{
-        type: 'bar', barWidth: 14,
-        data: data.map(v => v / 60),
-        itemStyle: {
-          color: (p: { value: number }) => {
-            const ratio = p.value / (maxVal / 60);
-            if (ratio < 0.2) return 'rgba(80,72,229,0.2)';
-            if (ratio < 0.5) return 'rgba(80,72,229,0.5)';
-            return '#5048E5';
-          },
-          borderRadius: [2, 2, 0, 0],
-        },
-      }],
-    };
-  }
-
-  function buildRingOption(items: AppRankItem[]): Record<string, unknown> {
-    if (!items.length) return {};
-    const colors = CATEGORY_COLORS;
-    return {
-      tooltip: { trigger: 'item', formatter: (p: { name: string; value: number }) => `${p.name}: ${formatDuration(p.value)}` },
-      series: [{
-        type: 'pie', radius: ['50%', '75%'], center: ['50%', '50%'],
-        data: items.map((item, i) => ({
-          name: item.display_name ?? item.process_name,
-          value: item.total_seconds,
-          itemStyle: { color: colors[i % colors.length] },
-        })),
-        label: { show: false },
-        emphasis: { label: { show: false } },
-      }],
-      graphic: [{
-        type: 'text', left: 'center', top: '43%',
-        style: { text: `${items.length}`, fill: '#5048E5', font: '600 20px "Segoe UI Variable Display", "Segoe UI", sans-serif', textAlign: 'center' },
-      }, {
-        type: 'text', left: 'center', top: '56%',
-        style: { text: '应用', fill: '#9A92C8', font: '400 8px "Segoe UI", sans-serif', textAlign: 'center' },
-      }],
-    };
-  }
 </script>
 
 <div class="page">
@@ -235,29 +184,29 @@
 
   .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
 
-  .page-title { font-family: 'Segoe UI Variable Display','Segoe UI',sans-serif; font-weight: 600; font-size: 0.85rem; color: #1A1A32; margin: 0; }
-  .page-desc { font-family: 'Segoe UI',sans-serif; font-size: 0.5rem; color: #6A62A0; margin-top: 0.125rem; }
-  .page-date { font-family: 'Segoe UI',sans-serif; font-size: 0.5rem; color: #9A92C8; }
+  .page-title { font-family: 'Segoe UI Variable Display','Segoe UI',sans-serif; font-weight: 600; font-size: 0.85rem; color: theme('colors.text.primary'); margin: 0; }
+  .page-desc { font-family: 'Segoe UI',sans-serif; font-size: 0.5rem; color: theme('colors.text.secondary'); margin-top: 0.125rem; }
+  .page-date { font-family: 'Segoe UI',sans-serif; font-size: 0.5rem; color: theme('colors.text.tertiary'); }
 
-  .hero-card { background:#F8F6FE; border:1px solid #E0DCF0; border-radius:4px; box-shadow:0 2px 8px rgba(0,0,0,0.05); display:flex; align-items:center; justify-content:space-between; padding:0.75rem; }
+  .hero-card { background:theme('colors.sidebar'); border:1px solid theme('colors.border'); border-radius:4px; box-shadow:0 2px 8px rgba(0,0,0,0.05); display:flex; align-items:center; justify-content:space-between; padding:0.75rem; }
   .hero-left { display:flex; flex-direction:column; gap:0.125rem; }
-  .hero-app-name { font-family:'Segoe UI Variable Display','Segoe UI',sans-serif; font-weight:600; font-size:1.2rem; color:#1A1A32; }
-  .hero-since { font-family:'Segoe UI',sans-serif; font-size:0.5rem; color:#6A62A0; }
+  .hero-app-name { font-family:'Segoe UI Variable Display','Segoe UI',sans-serif; font-weight:600; font-size:1.2rem; color:theme('colors.text.primary'); }
+  .hero-since { font-family:'Segoe UI',sans-serif; font-size:0.5rem; color:theme('colors.text.secondary'); }
   .hero-right { display:flex; flex-direction:column; align-items:flex-end; gap:0.125rem; }
-  .hero-timer { font-family:'JetBrains Mono',monospace; font-weight:500; font-size:1.2rem; color:#5048E5; }
-  .hero-timer-label { font-family:'Segoe UI',sans-serif; font-size:0.5rem; color:#6A62A0; }
+  .hero-timer { font-family:'JetBrains Mono',monospace; font-weight:500; font-size:1.2rem; color:theme('colors.primary.DEFAULT'); }
+  .hero-timer-label { font-family:'Segoe UI',sans-serif; font-size:0.5rem; color:theme('colors.text.secondary'); }
 
   .stats-row { display:grid; grid-template-columns:repeat(4,1fr); gap:0.75rem; margin-top:1rem; }
-  .stat-card { background:#F8F6FE; border:1px solid #E0DCF0; border-radius:4px; box-shadow:0 2px 8px rgba(0,0,0,0.05); display:flex; flex-direction:column; align-items:center; justify-content:center; padding:0.75rem 0.5rem; gap:0.125rem; }
-  .stat-value { font-family:'Segoe UI Variable Display','Segoe UI',sans-serif; font-weight:600; font-size:0.75rem; color:#1A1A32; }
-  .stat-label { font-family:'Segoe UI',sans-serif; font-size:0.5rem; color:#6A62A0; }
+  .stat-card { background:theme('colors.sidebar'); border:1px solid theme('colors.border'); border-radius:4px; box-shadow:0 2px 8px rgba(0,0,0,0.05); display:flex; flex-direction:column; align-items:center; justify-content:center; padding:0.75rem 0.5rem; gap:0.125rem; }
+  .stat-value { font-family:'Segoe UI Variable Display','Segoe UI',sans-serif; font-weight:600; font-size:0.75rem; color:theme('colors.text.primary'); }
+  .stat-label { font-family:'Segoe UI',sans-serif; font-size:0.5rem; color:theme('colors.text.secondary'); }
 
-  .panel-title { font-family:'Segoe UI Variable Display','Segoe UI',sans-serif; font-weight:600; font-size:0.5rem; color:#1A1A32; }
+  .panel-title { font-family:'Segoe UI Variable Display','Segoe UI',sans-serif; font-weight:600; font-size:0.5rem; color:theme('colors.text.primary'); }
 
   .time-axis { position:relative; margin-top:0.75rem; height:40px; }
-  .axis-line { position:absolute; top:12px; left:0; right:0; height:1px; background:#E0DCF0; }
+  .axis-line { position:absolute; top:12px; left:0; right:0; height:1px; background:theme('colors.border'); }
   .axis-labels { display:flex; justify-content:space-between; padding:0 0.25rem; position:absolute; top:8px; left:0; right:0; }
-  .axis-label { font-family:'JetBrains Mono',monospace; font-size:0.4rem; color:#9A92C8; }
+  .axis-label { font-family:'JetBrains Mono',monospace; font-size:0.4rem; color:theme('colors.text.tertiary'); }
   .now-marker { position:absolute; top:0; transform:translateX(-50%); display:flex; flex-direction:column; align-items:center; transition:left 60s linear; }
   .now-dot { width:6px; height:6px; border-radius:50%; background:#F5A623; }
   .now-line { width:1px; height:28px; background:#F5A623; }
@@ -267,14 +216,14 @@
 
   .rank-list { display:flex; flex-direction:column; gap:0.25rem; margin-top:0.375rem; }
   .rank-item { display:flex; align-items:center; gap:0.25rem; }
-  .rank-num { font-family:'JetBrains Mono',monospace; font-size:0.4rem; color:#9A92C8; width:12px; text-align:right; }
+  .rank-num { font-family:'JetBrains Mono',monospace; font-size:0.4rem; color:theme('colors.text.tertiary'); width:12px; text-align:right; }
   .rank-icon { width:18px; height:18px; flex-shrink:0; }
   .rank-icon-img { width:18px; height:18px; border-radius:3px; }
-  .app-icon-placeholder { width:18px; height:18px; border-radius:3px; background:#E0DCF0; display:flex; align-items:center; justify-content:center; font-family:'Segoe UI',sans-serif; font-size:0.4rem; color:#9A92C8; }
-  .rank-name { font-family:'Segoe UI',sans-serif; font-weight:600; font-size:0.5rem; color:#1A1A32; width:55px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .rank-bar-wrap { flex:1; height:5px; background:#F0ECF8; border-radius:3px; overflow:hidden; }
-  .rank-bar { height:100%; background:#5048E5; border-radius:3px; transition:width 0.3s; }
-  .rank-time { font-family:'JetBrains Mono',monospace; font-size:0.45rem; color:#6A62A0; width:44px; text-align:right; }
+  .app-icon-placeholder { width:18px; height:18px; border-radius:3px; background:theme('colors.border'); display:flex; align-items:center; justify-content:center; font-family:'Segoe UI',sans-serif; font-size:0.4rem; color:theme('colors.text.tertiary'); }
+  .rank-name { font-family:'Segoe UI',sans-serif; font-weight:600; font-size:0.5rem; color:theme('colors.text.primary'); width:55px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .rank-bar-wrap { flex:1; height:5px; background:theme('colors.heatmap.bg'); border-radius:3px; overflow:hidden; }
+  .rank-bar { height:100%; background:theme('colors.primary.DEFAULT'); border-radius:3px; transition:width 0.3s; }
+  .rank-time { font-family:'JetBrains Mono',monospace; font-size:0.45rem; color:theme('colors.text.secondary'); width:44px; text-align:right; }
   .rank-cat { font-family:'Segoe UI',sans-serif; font-size:0.4rem; border-radius:4px; padding:0 0.25rem; white-space:nowrap; }
-  .text-empty { font-family:'Segoe UI',sans-serif; font-size:0.5rem; color:#9A92C8; text-align:center; padding:0.5rem 0; }
+  .text-empty { font-family:'Segoe UI',sans-serif; font-size:0.5rem; color:theme('colors.text.tertiary'); text-align:center; padding:0.5rem 0; }
 </style>

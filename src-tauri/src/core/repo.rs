@@ -492,13 +492,14 @@ pub fn apply_category_rules(conn: &Connection) -> rusqlite::Result<usize> {
     }
     let mut updated = 0;
     let mut stmt = conn.prepare("SELECT id, process_name, display_name, category_id FROM apps")?;
-    let apps: Vec<(i64, String, Option<String>, i64)> = stmt
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get::<_, i64>(3)?)))?
-        .filter_map(|r| r.ok())
-        .collect();
-    for (app_id, pname, dname, cat_id) in &apps {
-        if *cat_id > 0 {
-            continue; // 手动指派，不覆盖
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, Option<String>>(2)?, r.get::<_, i64>(3)?)))?;
+    for row in rows {
+        let (app_id, pname, dname, cat_id) = match row {
+            Ok(r) => r,
+            Err(e) => { tracing::warn!("读取 app 行失败: {e}"); continue; }
+        };
+        if cat_id > 0 {
+            continue;
         }
         for (cat_id, rules_str) in &cats {
             for rule in rules_str.split(|c| c == ',' || c == ';' || c == '\n') {
@@ -506,7 +507,7 @@ pub fn apply_category_rules(conn: &Connection) -> rusqlite::Result<usize> {
                 if rule.is_empty() {
                     continue;
                 }
-                if glob_match(rule, pname) || dname.as_deref().is_some_and(|d| glob_match(rule, d)) {
+                if glob_match(rule, &pname) || dname.as_deref().is_some_and(|d| glob_match(rule, d)) {
                     conn.execute("UPDATE apps SET category_id = ?1 WHERE id = ?2", params![cat_id, app_id])?;
                     updated += 1;
                     break;

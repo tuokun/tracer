@@ -80,14 +80,14 @@
     font-family: 'Segoe UI Variable Display', 'Segoe UI', sans-serif;
     font-weight: 600;
     font-size: 0.85rem;
-    color: #1A1A32;
+    color: theme('colors.text.primary');
     margin: 0;
   }
 
   .page-desc {
     font-family: 'Segoe UI', sans-serif;
     font-size: 0.5rem;
-    color: #6A62A0;
+    color: theme('colors.text.secondary');
     margin-top: 0.125rem;
     margin-bottom: 1rem;
   }
@@ -109,13 +109,13 @@
     font-family: 'Segoe UI', sans-serif;
     font-size: 0.5rem;
     font-weight: 600;
-    color: #1A1A32;
+    color: theme('colors.text.primary');
   }
 
   .setting-desc {
     font-family: 'Segoe UI', sans-serif;
     font-size: 0.4rem;
-    color: #9A92C8;
+    color: theme('colors.text.tertiary');
   }
 
   .setting-value {
@@ -128,10 +128,10 @@
     width: 50px;
     padding: 0.25rem 0.375rem;
     border-radius: 4px;
-    border: 1px solid #E0DCF0;
+    border: 1px solid theme('colors.border');
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.5rem;
-    color: #1A1A32;
+    color: theme('colors.text.primary');
     text-align: center;
     outline: none;
   }
@@ -141,14 +141,14 @@
   .setting-unit {
     font-family: 'Segoe UI', sans-serif;
     font-size: 0.5rem;
-    color: #6A62A0;
+    color: theme('colors.text.secondary');
   }
 
   .setting-save {
     padding: 0.25rem 0.5rem;
     border-radius: 4px;
     border: none;
-    background: #5048E5;
+    background: theme('colors.primary.DEFAULT');
     color: #FFFFFF;
     font-family: 'Segoe UI', sans-serif;
     font-size: 0.4rem;
@@ -161,15 +161,15 @@
   .setting-static {
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.5rem;
-    color: #6A62A0;
+    color: theme('colors.text.secondary');
   }
 
-  .setting-divider { height: 1px; background: #E0DCF0; }
+  .setting-divider { height: 1px; background: theme('colors.border'); }
 
   .toggle { display: inline-flex; align-items: center; cursor: pointer; }
   .toggle input { display: none; }
   .toggle-slider { width: 28px; height: 16px; background: #D0C8E0; border-radius: 8px; position: relative; transition: 0.2s; }
   .toggle-slider::after { content:''; position:absolute; top:2px; left:2px; width:12px; height:12px; border-radius:50%; background:#fff; transition:0.2s; }
-  .toggle input:checked + .toggle-slider { background: #5048E5; }
+  .toggle input:checked + .toggle-slider { background: theme('colors.primary.DEFAULT'); }
   .toggle input:checked + .toggle-slider::after { left:14px; }
 </style>

@@ -118,21 +118,21 @@
     font-family: 'Segoe UI Variable Display', 'Segoe UI', sans-serif;
     font-weight: 600;
     font-size: 0.85rem;
-    color: #1A1A32;
+    color: theme('colors.text.primary');
     margin: 0;
   }
 
   .page-desc {
     font-family: 'Segoe UI', sans-serif;
     font-size: 0.5rem;
-    color: #6A62A0;
+    color: theme('colors.text.secondary');
     margin-top: 0.125rem;
   }
 
   .add-btn {
     padding: 0.375rem 0.75rem;
     border-radius: 4px;
-    background: #5048E5;
+    background: theme('colors.primary.DEFAULT');
     color: #FFFFFF;
     border: none;
     font-family: 'Segoe UI', sans-serif;
@@ -151,7 +151,7 @@
     font-family: 'Segoe UI', sans-serif;
     font-size: 0.5rem;
     font-weight: 600;
-    color: #1A1A32;
+    color: theme('colors.text.primary');
     width: 40px;
     flex-shrink: 0;
   }
@@ -160,14 +160,14 @@
     flex: 1;
     padding: 0.375rem 0.5rem;
     border-radius: 4px;
-    border: 1px solid #E0DCF0;
+    border: 1px solid theme('colors.border');
     font-family: 'Segoe UI', sans-serif;
     font-size: 0.5rem;
-    color: #1A1A32;
+    color: theme('colors.text.primary');
     outline: none;
   }
 
-  .form-input:focus { border-color: #5048E5; }
+  .form-input:focus { border-color: theme('colors.primary.DEFAULT'); }
 
   .color-picker { display: flex; gap: 0.375rem; }
 
@@ -180,16 +180,16 @@
     padding: 0;
   }
 
-  .color-swatch.selected { border-color: #1A1A32; }
+  .color-swatch.selected { border-color: theme('colors.text.primary'); }
 
   .form-actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 0.5rem; }
 
   .cancel-btn {
     padding: 0.375rem 0.75rem;
     border-radius: 4px;
-    border: 1px solid #E0DCF0;
+    border: 1px solid theme('colors.border');
     background: #FFFFFF;
-    color: #6A62A0;
+    color: theme('colors.text.secondary');
     font-family: 'Segoe UI', sans-serif;
     font-size: 0.5rem;
     cursor: pointer;
@@ -199,7 +199,7 @@
     padding: 0.375rem 0.75rem;
     border-radius: 4px;
     border: none;
-    background: #5048E5;
+    background: theme('colors.primary.DEFAULT');
     color: #FFFFFF;
     font-family: 'Segoe UI', sans-serif;
     font-size: 0.5rem;
@@ -209,7 +209,7 @@
 
   .empty-state {
     background: #FFFFFF;
-    border: 1px solid #E0DCF0;
+    border: 1px solid theme('colors.border');
     border-radius: 4px;
     box-shadow: 0 2px 8px rgba(0,0,0,0.05);
     display: flex;
@@ -222,7 +222,7 @@
 
   .cat-card {
     background: #FFFFFF;
-    border: 1px solid #E0DCF0;
+    border: 1px solid theme('colors.border');
     border-radius: 4px;
     box-shadow: 0 2px 8px rgba(0,0,0,0.05);
     overflow: hidden;
@@ -244,19 +244,19 @@
   .cat-rules-label {
     font-family: 'Segoe UI', sans-serif;
     font-size: 0.4rem;
-    color: #9A92C8;
+    color: theme('colors.text.tertiary');
     margin-bottom: 2px;
   }
 
   .cat-rules {
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.4rem;
-    color: #6A62A0;
+    color: theme('colors.text.secondary');
   }
 
   .cat-actions {
     display: flex;
-    border-top: 1px solid #F0ECF8;
+    border-top: 1px solid theme('colors.heatmap.bg');
   }
 
   .cat-action-btn {
@@ -266,11 +266,11 @@
     background: none;
     font-family: 'Segoe UI', sans-serif;
     font-size: 0.4rem;
-    color: #6A62A0;
+    color: theme('colors.text.secondary');
     cursor: pointer;
   }
 
-  .cat-action-btn:hover { background: rgba(80,72,229,0.08); color: #5048E5; }
+  .cat-action-btn:hover { background: theme('colors.primary.hover'); color: theme('colors.primary.DEFAULT'); }
 
   .cat-action-danger:hover { background: rgba(229,57,53,0.08); color: #E53935; }
 </style>

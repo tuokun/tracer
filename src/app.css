@@ -38,8 +38,5 @@
 }
 
 .card {
-  background: #FFFFFF;
-  border: 1px solid #E0DCF0;
-  border-radius: 4px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+  @apply bg-surface border border-border rounded shadow-card;
 }

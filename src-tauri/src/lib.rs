@@ -1,5 +1,6 @@
 mod core;
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use rusqlite::Connection;
@@ -24,9 +25,10 @@ struct SessionState {
     inner: Arc<Mutex<Option<CurrentSession>>>,
 }
 
-/// 图标存储目录。
+/// 图标存储目录 + 内存缓存。
 struct IconDir {
     path: std::path::PathBuf,
+    cache: Mutex<HashMap<String, String>>,
 }
 
 // ── Tauri Commands ──────────────────────────────
@@ -153,6 +155,15 @@ fn get_app_icon(
     exe_path: String,
     process_name: String,
 ) -> Result<String, String> {
+    // 查内存缓存
+    if let Ok(cache) = state.cache.lock() {
+        if let Some(cached) = cache.get(&process_name) {
+            if !cached.is_empty() {
+                return Ok(cached.clone());
+            }
+        }
+    }
+    // 未命中 → 提取 + 编码
     use std::io::Read;
     let path = core::iconer::extract(&exe_path, &state.path, &process_name)
         .ok_or("无关联图标")?;
@@ -161,7 +172,12 @@ fn get_app_icon(
     f.read_to_end(&mut buf).map_err(|e| e.to_string())?;
     use base64::Engine;
     let b64 = base64::engine::general_purpose::STANDARD.encode(&buf);
-    Ok(format!("data:image/png;base64,{b64}"))
+    let data_uri = format!("data:image/png;base64,{b64}");
+    // 写入缓存
+    if let Ok(mut cache) = state.cache.lock() {
+        cache.insert(process_name, data_uri.clone());
+    }
+    Ok(data_uri)
 }
 
 #[tauri::command]
@@ -234,7 +250,7 @@ pub fn run() {
             // 图标缓存目录。
             let icon_dir = data_dir.join("icons");
             std::fs::create_dir_all(&icon_dir)?;
-            app.manage(IconDir { path: icon_dir });
+            app.manage(IconDir { path: icon_dir, cache: Mutex::new(HashMap::new()) });
 
             // 读连接（供 Tauri 命令使用）。
             let read_conn = db::open(&db_path)?;

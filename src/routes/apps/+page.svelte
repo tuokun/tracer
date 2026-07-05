@@ -90,14 +90,14 @@
     font-family: 'Segoe UI Variable Display', 'Segoe UI', sans-serif;
     font-weight: 600;
     font-size: 0.85rem;
-    color: #1A1A32;
+    color: theme('colors.text.primary');
     margin: 0;
   }
 
   .page-desc {
     font-family: 'Segoe UI', sans-serif;
     font-size: 0.5rem;
-    color: #6A62A0;
+    color: theme('colors.text.secondary');
     margin-top: 0.125rem;
     margin-bottom: 1rem;
   }
@@ -108,11 +108,11 @@
     flex: 1;
     padding: 0.375rem 0.75rem;
     border-radius: 4px;
-    border: 1px solid #E0DCF0;
+    border: 1px solid theme('colors.border');
     background: #FFFFFF;
     font-family: 'Segoe UI', sans-serif;
     font-size: 0.5rem;
-    color: #1A1A32;
+    color: theme('colors.text.primary');
     outline: none;
   }
 
@@ -121,11 +121,11 @@
   .filter-select {
     padding: 0.375rem 0.75rem;
     border-radius: 4px;
-    border: 1px solid #E0DCF0;
+    border: 1px solid theme('colors.border');
     background: #FFFFFF;
     font-family: 'Segoe UI', sans-serif;
     font-size: 0.5rem;
-    color: #6A62A0;
+    color: theme('colors.text.secondary');
     outline: none;
   }
 
@@ -136,11 +136,11 @@
     align-items: center;
     gap: 0.375rem;
     padding: 0.5rem 0.75rem;
-    border-bottom: 1px solid #E0DCF0;
+    border-bottom: 1px solid theme('colors.border');
     font-family: 'Segoe UI', sans-serif;
     font-size: 0.5rem;
     font-weight: 600;
-    color: #6A62A0;
+    color: theme('colors.text.secondary');
   }
 
   .table-row {
@@ -148,20 +148,20 @@
     align-items: center;
     gap: 0.375rem;
     padding: 0.5rem 0.75rem;
-    border-bottom: 1px solid #F0ECF8;
+    border-bottom: 1px solid theme('colors.heatmap.bg');
     font-family: 'Segoe UI', sans-serif;
     font-size: 0.5rem;
-    color: #1A1A32;
+    color: theme('colors.text.primary');
   }
 
   .table-row:last-child { border-bottom: none; }
 
   .col-icon { width: 28px; }
   .col-icon img, .app-icon-placeholder { width: 20px; height: 20px; border-radius: 3px; vertical-align: middle; }
-  .app-icon-placeholder { display: inline-flex; align-items: center; justify-content: center; background: #E0DCF0; font-size: 0.4rem; color: #9A92C8; }
+  .app-icon-placeholder { display: inline-flex; align-items: center; justify-content: center; background: theme('colors.border'); font-size: 0.4rem; color: theme('colors.text.tertiary'); }
 
   .col-name { flex: 2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .col-path { flex: 3; font-size: 0.4rem; color: #6A62A0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .col-path { flex: 3; font-size: 0.4rem; color: theme('colors.text.secondary'); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .col-total { width: 60px; text-align: right; font-family: 'JetBrains Mono', monospace; font-size: 0.5rem; }
   .col-category { width: 60px; text-align: center; }
 

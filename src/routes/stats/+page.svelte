@@ -5,6 +5,7 @@
     getStats24h, getStatsRadar, getStatsPie, getStatsSummary, getAppRank
   } from '$lib/api/commands';
   import { formatDuration, todayTimestamp, startOfDay, endOfDay } from '$lib/utils/time';
+  import { buildBarOption, buildRadarOption, buildPieOption } from '$lib/charts/options';
   import type { RadarPoint, PieSlice, StatsSummary, AppRankItem } from '$lib/api/types';
 
   type Granularity = 'day' | 'week' | 'month' | 'year';
@@ -77,61 +78,6 @@
     return `${s.getFullYear()}`;
   }
 
-  function buildBarOption(data: [string, number[]][]): Record<string, unknown> {
-    const cats = Array.from({ length: 24 }, (_, i) => `${String(i).padStart(2, '0')}:00`);
-    return {
-      tooltip: { trigger: 'axis' },
-      legend: { show: data.length > 1, bottom: 0, textStyle: { fontSize: 9, color: '#6A62A0' } },
-      grid: { left: 36, right: 8, top: 8, bottom: data.length > 1 ? 28 : 8 },
-      xAxis: { type: 'category', data: cats, axisLabel: { fontSize: 8, color: '#9A92C8' }, axisLine: { show: false }, axisTick: { show: false } },
-      yAxis: { type: 'value', splitLine: { lineStyle: { color: '#F0ECF8' } }, axisLabel: { fontSize: 8, color: '#9A92C8' } },
-      series: data.length > 0
-        ? data.map(([name, vals]) => ({
-            name, type: 'bar', stack: 'total',
-            data: vals.map(v => Math.round(v / 60)),
-            itemStyle: { color: name === '未分类' ? '#9A92C8' : '#5048E5', borderRadius: [1, 1, 0, 0] },
-          }))
-        : [{ type: 'bar', data: [], itemStyle: { color: '#5048E5' } }],
-    };
-  }
-
-  function buildRadarOption(points: RadarPoint[]): Record<string, unknown> {
-    if (!points.length) return {};
-    return {
-      tooltip: { trigger: 'item' },
-      radar: {
-        indicator: points.map(p => ({ name: p.name.length > 4 ? p.name.slice(0, 4) : p.name, max: Math.max(...points.map(x => x.value), 1) })),
-        axisName: { color: '#6A62A0', fontSize: 9 },
-        splitArea: { areaStyle: { color: ['rgba(80,72,229,0.02)', 'rgba(80,72,229,0.04)'] } },
-        splitLine: { lineStyle: { color: '#E0DCF0' } },
-        axisLine: { lineStyle: { color: '#E0DCF0' } },
-      },
-      series: [{
-        type: 'radar', data: [{ value: points.map(p => p.value), name: '使用时长' }],
-        areaStyle: { color: 'rgba(80,72,229,0.15)' },
-        lineStyle: { color: '#5048E5', width: 1 },
-        itemStyle: { color: '#5048E5' },
-      }],
-    };
-  }
-
-  function buildPieOption(slices: PieSlice[]): Record<string, unknown> {
-    if (!slices.length) return {};
-    const total = slices.reduce((a, b) => a + b.value, 0);
-    return {
-      tooltip: { trigger: 'item', formatter: (p: { name: string; value: number }) => `${p.name}: ${formatDuration(p.value)}` },
-      series: [{
-        type: 'pie', radius: ['40%', '65%'], center: ['50%', '45%'],
-        data: slices.map(s => ({ name: s.name, value: s.value, itemStyle: { color: s.color ?? '#9A92C8' } })),
-        label: { show: false },
-        emphasis: { label: { show: true, fontSize: 9, fontWeight: 'bold' } },
-      }],
-      graphic: [{
-        type: 'text', left: 'center', top: '38%',
-        style: { text: `${Math.round(total / 60)}min`, fill: '#1A1A32', font: '600 11px "Segoe UI Variable Display", "Segoe UI", sans-serif', textAlign: 'center' },
-      }],
-    };
-  }
 </script>
 
 <div class="page">
@@ -223,7 +169,7 @@
     font-family: 'Segoe UI Variable Display', 'Segoe UI', sans-serif;
     font-weight: 600;
     font-size: 0.85rem;
-    color: #1A1A32;
+    color: theme('colors.text.primary');
     margin: 0;
   }
 
@@ -239,36 +185,36 @@
   .gran-btn {
     font-family: 'Segoe UI', sans-serif;
     font-size: 0.5rem;
-    color: #6A62A0;
+    color: theme('colors.text.secondary');
     padding: 0.25rem 0.75rem;
     border-radius: 4px;
-    border: 1px solid #E0DCF0;
+    border: 1px solid theme('colors.border');
     background: #FFFFFF;
     cursor: pointer;
   }
 
-  .gran-btn:hover { background: rgba(80,72,229,0.08); color: #5048E5; }
-  .gran-btn.active { background: #5048E5; color: #FFFFFF; border-color: #5048E5; }
+  .gran-btn:hover { background: theme('colors.primary.hover'); color: theme('colors.primary.DEFAULT'); }
+  .gran-btn.active { background: theme('colors.primary.DEFAULT'); color: #FFFFFF; border-color: theme('colors.primary.DEFAULT'); }
 
   .time-nav { display: flex; align-items: center; gap: 0.5rem; }
 
   .nav-btn {
     font-family: 'Segoe UI', sans-serif;
     font-size: 0.5rem;
-    color: #6A62A0;
+    color: theme('colors.text.secondary');
     padding: 0.25rem 0.5rem;
     border-radius: 4px;
-    border: 1px solid #E0DCF0;
+    border: 1px solid theme('colors.border');
     background: #FFFFFF;
     cursor: pointer;
   }
 
-  .nav-btn:hover { background: rgba(80,72,229,0.08); color: #5048E5; }
+  .nav-btn:hover { background: theme('colors.primary.hover'); color: theme('colors.primary.DEFAULT'); }
 
   .time-label {
     font-family: 'Segoe UI', sans-serif;
     font-size: 0.5rem;
-    color: #1A1A32;
+    color: theme('colors.text.primary');
     min-width: 7em;
     text-align: center;
   }
@@ -280,7 +226,7 @@
   .mt-2 { margin-top: 0.5rem; }
   .pt-2 { padding-top: 0.5rem; }
 
-  .panel-title { font-family: 'Segoe UI Variable Display', 'Segoe UI', sans-serif; font-weight: 600; font-size: 0.5rem; color: #1A1A32; }
+  .panel-title { font-family: 'Segoe UI Variable Display', 'Segoe UI', sans-serif; font-weight: 600; font-size: 0.5rem; color: theme('colors.text.primary'); }
 
   .rank-list { display: flex; flex-direction: column; gap: 0.375rem; }
 
@@ -289,7 +235,7 @@
   .rank-num {
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.4rem;
-    color: #9A92C8;
+    color: theme('colors.text.tertiary');
     width: 12px;
     text-align: right;
   }
@@ -298,7 +244,7 @@
     font-family: 'Segoe UI', sans-serif;
     font-size: 0.5rem;
     font-weight: 600;
-    color: #1A1A32;
+    color: theme('colors.text.primary');
     flex: 1;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -308,7 +254,7 @@
   .rank-time {
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.5rem;
-    color: #6A62A0;
+    color: theme('colors.text.secondary');
   }
 
   .summary-strip { display: flex; flex-direction: column; gap: 0.375rem; }
@@ -318,13 +264,13 @@
   .summary-val {
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.5rem;
-    color: #1A1A32;
+    color: theme('colors.text.primary');
   }
 
   .summary-lbl {
     font-family: 'Segoe UI', sans-serif;
     font-size: 0.4rem;
-    color: #9A92C8;
+    color: theme('colors.text.tertiary');
   }
 
   .pie-legend {
@@ -346,6 +292,6 @@
   .pie-legend-name {
     font-family: 'Segoe UI', sans-serif;
     font-size: 0.4rem;
-    color: #6A62A0;
+    color: theme('colors.text.secondary');
   }
 </style>

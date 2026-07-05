@@ -5,12 +5,33 @@ use windows::Win32::Foundation::HINSTANCE;
 use windows::Win32::Graphics::Gdi::{
     CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDIBits,
     GetObjectW, SelectObject, BITMAP, BITMAPINFO, BITMAPINFOHEADER, BI_RGB,
-    DIB_RGB_COLORS, HBITMAP, RGBQUAD,
+    DIB_RGB_COLORS, HBITMAP, HGDIOBJ, RGBQUAD,
 };
 use windows::Win32::UI::Shell::ExtractAssociatedIconW;
 use windows::Win32::UI::WindowsAndMessaging::{
     DestroyIcon, DrawIconEx, GetIconInfo, DI_FLAGS, HICON,
 };
+
+struct GdiCleanup {
+    dc: Option<HDC>,
+    bitmaps: Vec<HBITMAP>,
+}
+
+// Re-import the internal HDC alias used by GDI functions.
+use windows::Win32::Graphics::Gdi::HDC;
+
+impl Drop for GdiCleanup {
+    fn drop(&mut self) {
+        unsafe {
+            for &bmp in &self.bitmaps {
+                let _ = DeleteObject(bmp.into());
+            }
+            if let Some(dc) = self.dc {
+                let _ = DeleteDC(dc);
+            }
+        }
+    }
+}
 
 pub fn extract(exe_path: &str, store_dir: &Path, stem: &str) -> Option<String> {
     let icon_path = store_dir.join(format!("{}.png", stem));
@@ -20,7 +41,6 @@ pub fn extract(exe_path: &str, store_dir: &Path, stem: &str) -> Option<String> {
     std::fs::create_dir_all(store_dir).ok()?;
 
     unsafe {
-        // ExtractAssociatedIconW 要求 &mut [u16; 128]
         let mut buf = [0u16; 128];
         let wide: Vec<u16> = exe_path.encode_utf16().collect();
         let copy_len = wide.len().min(127);
@@ -50,41 +70,39 @@ pub fn extract(exe_path: &str, store_dir: &Path, stem: &str) -> Option<String> {
 }
 
 unsafe fn save_hicon_as_png(hicon: HICON, dest: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let mut cleanup = GdiCleanup { dc: None, bitmaps: vec![] };
+
     let mut info = std::mem::zeroed();
     GetIconInfo(hicon, &mut info)?;
+    let hbm_color = HBITMAP(info.hbmColor.0);
+    let hbm_mask = HBITMAP(info.hbmMask.0);
+    cleanup.bitmaps.push(hbm_color);
+    cleanup.bitmaps.push(hbm_mask);
 
     let mut bm: BITMAP = std::mem::zeroed();
     let cb = std::mem::size_of::<BITMAP>() as i32;
-    let color_hgdobj: windows::Win32::Graphics::Gdi::HGDIOBJ =
-        HBITMAP(info.hbmColor.0).into();
-    if GetObjectW(color_hgdobj, cb, Some(&mut bm as *mut _ as *mut _)) == 0 {
-        let _ = DeleteObject(HBITMAP(info.hbmColor.0).into());
-        let _ = DeleteObject(HBITMAP(info.hbmMask.0).into());
+    let hgdobj: HGDIOBJ = hbm_color.into();
+    if GetObjectW(hgdobj, cb, Some(&mut bm as *mut _ as *mut _)) == 0 {
         return Err("GetObjectW 失败".into());
     }
 
     let w = bm.bmWidth;
     let h = bm.bmHeight;
     if w <= 0 || h <= 0 {
-        let _ = DeleteObject(HBITMAP(info.hbmColor.0).into());
-        let _ = DeleteObject(HBITMAP(info.hbmMask.0).into());
         return Err("无效图标尺寸".into());
     }
 
     let dc = CreateCompatibleDC(None);
     if dc.is_invalid() {
-        let _ = DeleteObject(HBITMAP(info.hbmColor.0).into());
-        let _ = DeleteObject(HBITMAP(info.hbmMask.0).into());
         return Err("CreateCompatibleDC 失败".into());
     }
+    cleanup.dc = Some(dc);
 
     let bmp = CreateCompatibleBitmap(dc, w, h);
     if bmp.is_invalid() {
-        let _ = DeleteDC(dc);
-        let _ = DeleteObject(HBITMAP(info.hbmColor.0).into());
-        let _ = DeleteObject(HBITMAP(info.hbmMask.0).into());
         return Err("CreateCompatibleBitmap 失败".into());
     }
+    cleanup.bitmaps.push(bmp);
 
     let old = SelectObject(dc, bmp.into());
     let _ = DrawIconEx(dc, 0, 0, hicon, w, h, 0, None, DI_FLAGS(0x0003u32));
@@ -119,7 +137,6 @@ unsafe fn save_hicon_as_png(hicon: HICON, dest: &Path) -> Result<(), Box<dyn std
         DIB_RGB_COLORS,
     );
 
-    // BGRA → RGBA
     for chunk in pixels.chunks_mut(4) {
         let r = chunk[2];
         let g = chunk[1];
@@ -133,9 +150,6 @@ unsafe fn save_hicon_as_png(hicon: HICON, dest: &Path) -> Result<(), Box<dyn std
         .ok_or("RgbaImage::from_raw 失败")?;
     img.save(dest)?;
 
-    let _ = DeleteObject(bmp.into());
-    let _ = DeleteDC(dc);
-    let _ = DeleteObject(HBITMAP(info.hbmColor.0).into());
-    let _ = DeleteObject(HBITMAP(info.hbmMask.0).into());
+    drop(cleanup);
     Ok(())
 }
