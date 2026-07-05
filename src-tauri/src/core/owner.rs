@@ -26,10 +26,12 @@ struct Segment {
 
 /// 在 Tauri 异步运行时上启动 owner task，串行消费所有事件。
 /// `session_state` 供 Tauri 命令读取当前前台会话。
+/// `last_active` 记录最近的非 tracer 应用。
 pub fn spawn(
     mut rx: UnboundedReceiver<Event>,
     conn: Connection,
     session_state: Arc<Mutex<Option<CurrentSession>>>,
+    last_active: Arc<Mutex<Option<CurrentSession>>>,
 ) {
     let cfg = config::load(&conn);
     if let Ok(n) = db::table_count(&conn) {
@@ -79,18 +81,30 @@ pub fn spawn(
                                 }
                             }
                         }
-                        match repo::upsert_app(&conn, &info.name, None, Some(&info.path)) {
+                        let is_tracer = info.name == "tracer.exe";
+                        match repo::upsert_app(&conn, &info.name, info.display_name.as_deref(), Some(&info.path)) {
                             Ok(app_id) => {
                                 let process_name = info.name.clone();
                                 current = Some(Segment { app_id, start: now });
-                                // 更新共享的 session state
+                                // 更新 session state
                                 if let Ok(mut s) = session_state.lock() {
                                     *s = Some(CurrentSession {
-                                        process_name,
+                                        process_name: process_name.clone(),
                                         display_name: None,
                                         start_timestamp: now,
                                         current_duration: 0,
                                     });
+                                }
+                                // 非 tracer 则同时更新 last_active
+                                if !is_tracer {
+                                    if let Ok(mut s) = last_active.lock() {
+                                        *s = Some(CurrentSession {
+                                            process_name,
+                                            display_name: None,
+                                            start_timestamp: now,
+                                            current_duration: 0,
+                                        });
+                                    }
                                 }
                                 info!(pid = info.pid, name = %info.name, peak = ?peak, "前台切换（已记录）");
                             }

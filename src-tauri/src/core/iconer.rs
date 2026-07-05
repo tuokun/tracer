@@ -1,43 +1,35 @@
+use std::mem::size_of;
 use std::path::Path;
 
 use tracing::{error, warn};
 use windows::Win32::Foundation::HINSTANCE;
 use windows::Win32::Graphics::Gdi::{
-    CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDIBits,
-    GetObjectW, SelectObject, BITMAP, BITMAPINFO, BITMAPINFOHEADER, BI_RGB,
-    DIB_RGB_COLORS, HBITMAP, HGDIOBJ, RGBQUAD,
+    CreateCompatibleDC, DeleteDC, DeleteObject, GetDIBits, GetObjectW, BITMAP, BITMAPINFO,
+    BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HBITMAP, HDC, RGBQUAD,
 };
 use windows::Win32::UI::Shell::ExtractAssociatedIconW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    DestroyIcon, DrawIconEx, GetIconInfo, DI_FLAGS, HICON,
+    DestroyIcon, GetIconInfo, HICON, ICONINFO,
 };
 
-struct GdiCleanup {
-    dc: Option<HDC>,
-    bitmaps: Vec<HBITMAP>,
+/// RAII：作用域结束自动 DeleteObject。
+struct HbitmapGuard(HBITMAP);
+impl Drop for HbitmapGuard {
+    fn drop(&mut self) {
+        unsafe { let _ = DeleteObject(self.0.into()); }
+    }
 }
 
-// Re-import the internal HDC alias used by GDI functions.
-use windows::Win32::Graphics::Gdi::HDC;
-
-impl Drop for GdiCleanup {
+/// RAII：作用域结束自动 DeleteDC。
+struct DcGuard(HDC);
+impl Drop for DcGuard {
     fn drop(&mut self) {
-        unsafe {
-            for &bmp in &self.bitmaps {
-                let _ = DeleteObject(bmp.into());
-            }
-            if let Some(dc) = self.dc {
-                let _ = DeleteDC(dc);
-            }
-        }
+        unsafe { let _ = DeleteDC(self.0); }
     }
 }
 
 pub fn extract(exe_path: &str, store_dir: &Path, stem: &str) -> Option<String> {
     let icon_path = store_dir.join(format!("{}.png", stem));
-    if icon_path.exists() {
-        return Some(icon_path.to_string_lossy().to_string());
-    }
     std::fs::create_dir_all(store_dir).ok()?;
 
     unsafe {
@@ -69,50 +61,36 @@ pub fn extract(exe_path: &str, store_dir: &Path, stem: &str) -> Option<String> {
     }
 }
 
+/// 直接读取图标自带的 32bpp hbmColor 位图（保留 alpha 通道）。
+/// 比 DrawIconEx 绘制到 compatible bitmap 更可靠——后者会丢失 alpha，导致 PNG 透明。
 unsafe fn save_hicon_as_png(hicon: HICON, dest: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let mut cleanup = GdiCleanup { dc: None, bitmaps: vec![] };
-
-    let mut info = std::mem::zeroed();
+    let mut info: ICONINFO = std::mem::zeroed();
     GetIconInfo(hicon, &mut info)?;
-    let hbm_color = HBITMAP(info.hbmColor.0);
-    let hbm_mask = HBITMAP(info.hbmMask.0);
-    cleanup.bitmaps.push(hbm_color);
-    cleanup.bitmaps.push(hbm_mask);
+    let _mask = HbitmapGuard(info.hbmMask);
+    let color = HbitmapGuard(info.hbmColor);
 
     let mut bm: BITMAP = std::mem::zeroed();
-    let cb = std::mem::size_of::<BITMAP>() as i32;
-    let hgdobj: HGDIOBJ = hbm_color.into();
-    if GetObjectW(hgdobj, cb, Some(&mut bm as *mut _ as *mut _)) == 0 {
+    if GetObjectW(
+        color.0.into(),
+        size_of::<BITMAP>() as i32,
+        Some(&mut bm as *mut _ as *mut _),
+    ) == 0
+    {
         return Err("GetObjectW 失败".into());
     }
-
     let w = bm.bmWidth;
     let h = bm.bmHeight;
     if w <= 0 || h <= 0 {
         return Err("无效图标尺寸".into());
     }
 
-    let dc = CreateCompatibleDC(None);
-    if dc.is_invalid() {
-        return Err("CreateCompatibleDC 失败".into());
-    }
-    cleanup.dc = Some(dc);
-
-    let bmp = CreateCompatibleBitmap(dc, w, h);
-    if bmp.is_invalid() {
-        return Err("CreateCompatibleBitmap 失败".into());
-    }
-    cleanup.bitmaps.push(bmp);
-
-    let old = SelectObject(dc, bmp.into());
-    let _ = DrawIconEx(dc, 0, 0, hicon, w, h, 0, None, DI_FLAGS(0x0003u32));
-    let _ = SelectObject(dc, old);
+    let dc = DcGuard(CreateCompatibleDC(None));
 
     let mut bi = BITMAPINFO {
         bmiHeader: BITMAPINFOHEADER {
-            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+            biSize: size_of::<BITMAPINFOHEADER>() as u32,
             biWidth: w,
-            biHeight: -h,
+            biHeight: -h, // 负值=自上而下，匹配 image crate 期望
             biPlanes: 1,
             biBitCount: 32,
             biCompression: BI_RGB.0,
@@ -125,31 +103,42 @@ unsafe fn save_hicon_as_png(hicon: HICON, dest: &Path) -> Result<(), Box<dyn std
         bmiColors: [RGBQUAD::default(); 1],
     };
 
-    let row_len = w as usize * 4;
-    let mut pixels = vec![0u8; row_len * h as usize];
-    GetDIBits(
-        dc,
-        bmp,
+    let mut pixels = vec![0u8; (w as usize) * (h as usize) * 4];
+    let got = GetDIBits(
+        dc.0,
+        color.0,
         0,
         h as u32,
         Some(pixels.as_mut_ptr() as *mut _),
         &mut bi,
         DIB_RGB_COLORS,
     );
+    if got == 0 {
+        return Err("GetDIBits 失败".into());
+    }
 
+    // 判断图标是否自带有效 alpha 通道。
+    let has_alpha = pixels.chunks(4).any(|c| c[3] != 0);
+    // BGRA → RGBA；alpha 无效时（旧式图标）按"非黑像素=不透明"补全。
     for chunk in pixels.chunks_mut(4) {
-        let r = chunk[2];
-        let g = chunk[1];
         let b = chunk[0];
+        let g = chunk[1];
+        let r = chunk[2];
+        let a = if has_alpha {
+            chunk[3]
+        } else if (r | g | b) != 0 {
+            255
+        } else {
+            0
+        };
         chunk[0] = r;
         chunk[1] = g;
         chunk[2] = b;
+        chunk[3] = a;
     }
 
     let img = image::RgbaImage::from_raw(w as u32, h as u32, pixels)
         .ok_or("RgbaImage::from_raw 失败")?;
     img.save(dest)?;
-
-    drop(cleanup);
     Ok(())
 }

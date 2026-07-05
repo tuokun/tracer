@@ -16,8 +16,8 @@ export async function getCurrentSession(): Promise<CurrentSession | null> {
   }
 }
 
-export async function getAppRank(date: number, limit?: number): Promise<AppRankItem[]> {
-  return invoke('get_app_rank', { date, limit: limit ?? 10 });
+export async function getAppRank(start: number, end: number, limit?: number): Promise<AppRankItem[]> {
+  return invoke('get_app_rank', { start, end, limit: limit ?? 10 });
 }
 
 export async function getHourlyHeatmap(date: number): Promise<number[]> {
@@ -48,8 +48,8 @@ export async function applyCategoryRules(): Promise<number> {
   return invoke('apply_category_rules');
 }
 
-export async function getStats24h(date: number): Promise<[string, number[]][]> {
-  return invoke('get_stats_24h', { date });
+export async function getStatsRange(granularity: string, start: number, end: number, limit?: number): Promise<[string, number[]][]> {
+  return invoke('get_stats_range', { granularity, start, end, limit: limit ?? 5 });
 }
 
 export async function getStatsRadar(start: number, end: number): Promise<RadarPoint[]> {
@@ -72,6 +72,10 @@ export async function getAppIcon(
   exePath: string, processName: string
 ): Promise<string> {
   return invoke('get_app_icon', { exePath, processName });
+}
+
+export async function setAppCategory(appId: number, categoryId: number): Promise<void> {
+  return invoke('set_app_category', { appId, categoryId });
 }
 
 export async function getConfigValue(key: string): Promise<string | null> {

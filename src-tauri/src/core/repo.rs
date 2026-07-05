@@ -4,10 +4,13 @@
 //! upsert 进 `hours_log`/`daily_log`，并累加 `apps.total_time`，单事务。
 //! 切分逻辑对齐 Tai `Data.UpdateAppDuration`，桶语义见 `方案评审记录.md` 一·1。
 
-use chrono::{Local, TimeZone, Timelike};
+use chrono::{Datelike, Local, TimeZone, Timelike};
 use rusqlite::{params, Connection};
 
 /// 落库一个 app（按 `process_name` 去重），返回其 id。
+///
+/// `display_name` / `executable_path` 提供时覆盖旧值，未提供（`None`）时保留旧值——
+/// 这样应用升级后 FileDescription 改了会跟着更新；解析失败也不会清空已有数据。
 pub fn upsert_app(
     conn: &Connection,
     process_name: &str,
@@ -15,8 +18,10 @@ pub fn upsert_app(
     executable_path: Option<&str>,
 ) -> rusqlite::Result<i64> {
     conn.execute(
-        "INSERT OR IGNORE INTO apps(process_name, display_name, executable_path) \
-         VALUES (?1, ?2, ?3)",
+        "INSERT INTO apps(process_name, display_name, executable_path) VALUES (?1, ?2, ?3) \
+         ON CONFLICT(process_name) DO UPDATE SET \
+            display_name = COALESCE(excluded.display_name, apps.display_name), \
+            executable_path = COALESCE(excluded.executable_path, apps.executable_path)",
         params![process_name, display_name, executable_path],
     )?;
     conn.query_row(
@@ -42,6 +47,7 @@ pub fn add_duration(
         upsert_hours(&tx, app_id, hour_ts, secs)?;
         upsert_daily(&tx, app_id, date, secs)?;
     }
+    // 注：date 为"当天零点 unix 时间戳"，与所有 daily_log 查询的语义一致。
     tx.execute(
         "UPDATE apps SET total_time = total_time + ?1 WHERE id = ?2",
         params![duration_secs, app_id],
@@ -49,9 +55,9 @@ pub fn add_duration(
     tx.commit()
 }
 
-/// 把段切分为若干本地小时桶：(整点时间戳, YYYYMMDD, 该小时内秒数)。
+/// 把段切分为若干本地小时桶：(整点 unix 时间戳, 当天零点 unix 时间戳, 该小时内秒数)。
 /// 纯函数，单测覆盖（含跨小时、跨天）。
-fn split_hours(start_unix: i64, duration_secs: i64) -> Vec<(i64, u32, i64)> {
+fn split_hours(start_unix: i64, duration_secs: i64) -> Vec<(i64, i64, i64)> {
     if duration_secs <= 0 {
         return vec![];
     }
@@ -74,8 +80,13 @@ fn split_hours(start_unix: i64, duration_secs: i64) -> Vec<(i64, u32, i64)> {
         let seg_end = end_unix.min(bucket_end_ts);
         let secs = seg_end - seg_start;
         if secs > 0 {
-            let date: u32 = hour_dt.format("%Y%m%d").to_string().parse().unwrap();
-            out.push((bucket_start_ts, date, secs));
+            // 当天零点 unix 时间戳（与 daily_log 查询语义一致）。
+            let day_start = hour_dt
+                .date_naive()
+                .and_hms_opt(0, 0, 0)
+                .map(|d| Local.from_local_datetime(&d).unwrap().timestamp())
+                .unwrap_or(bucket_start_ts);
+            out.push((bucket_start_ts, day_start, secs));
         }
         if bucket_end_ts >= end_unix {
             break;
@@ -109,7 +120,7 @@ fn upsert_hours(conn: &Connection, app_id: i64, data_time: i64, secs: i64) -> ru
     }
 }
 
-fn upsert_daily(conn: &Connection, app_id: i64, date: u32, secs: i64) -> rusqlite::Result<()> {
+fn upsert_daily(conn: &Connection, app_id: i64, date: i64, secs: i64) -> rusqlite::Result<()> {
     let existing: Option<i64> = conn
         .query_row(
             "SELECT time FROM daily_log WHERE app_id = ?1 AND date = ?2",
@@ -170,7 +181,7 @@ pub fn get_today_summary(conn: &Connection) -> rusqlite::Result<TodaySummary> {
         .unwrap_or(0);
     let most_used: Option<String> = conn
         .query_row(
-            "SELECT a.display_name FROM daily_log d \
+            "SELECT COALESCE(a.display_name, a.process_name) FROM daily_log d \
              JOIN apps a ON d.app_id = a.id \
              WHERE d.date >= ?1 AND d.date < ?2 \
              ORDER BY d.time DESC LIMIT 1",
@@ -190,27 +201,32 @@ pub fn get_today_summary(conn: &Connection) -> rusqlite::Result<TodaySummary> {
     })
 }
 
-/// 应用排行（指定日期，前 N 个）。
-pub fn get_app_rank(conn: &Connection, date_ts: i64, limit: usize) -> rusqlite::Result<Vec<AppRankItem>> {
-    let end = date_ts + SECS_PER_DAY;
+/// 应用排行（指定范围内总时长，前 N 个）。
+pub fn get_app_rank(
+    conn: &Connection,
+    start_ts: i64,
+    end_ts: i64,
+    limit: usize,
+) -> rusqlite::Result<Vec<AppRankItem>> {
     let total: f64 = conn
         .query_row(
             "SELECT COALESCE(SUM(time),0) FROM daily_log WHERE date >= ?1 AND date < ?2",
-            params![date_ts, end],
+            params![start_ts, end_ts],
             |r| r.get(0),
         )
         .unwrap_or(0) as f64;
     let mut stmt = conn.prepare(
-        "SELECT a.process_name, a.display_name, a.icon_path, a.executable_path, d.time, \
+        "SELECT a.process_name, a.display_name, a.icon_path, a.executable_path, SUM(d.time), \
                 c.name, c.color \
          FROM daily_log d \
          JOIN apps a ON d.app_id = a.id \
          LEFT JOIN categories c ON a.category_id = c.id \
          WHERE d.date >= ?1 AND d.date < ?2 \
-         ORDER BY d.time DESC \
+         GROUP BY a.id \
+         ORDER BY SUM(d.time) DESC \
          LIMIT ?3",
     )?;
-    let rows = stmt.query_map(params![date_ts, end, limit as i64], |r| {
+    let rows = stmt.query_map(params![start_ts, end_ts, limit as i64], |r| {
         let secs: i64 = r.get(4)?;
         Ok(AppRankItem {
             process_name: r.get(0)?,
@@ -354,32 +370,133 @@ pub fn delete_category(conn: &Connection, id: i64) -> rusqlite::Result<()> {
     Ok(())
 }
 
-/// 24h 小时分布（堆叠模式，按分类分组）。
-pub fn get_stats_24h(conn: &Connection, date_ts: i64) -> rusqlite::Result<Vec<(String, Vec<i64>)>> {
-    let end = date_ts + SECS_PER_DAY;
-    let mut stmt = conn.prepare(
-        "SELECT COALESCE(c.name,'未分类'), h.data_time, SUM(h.time) \
-         FROM hours_log h \
-         JOIN apps a ON h.app_id = a.id \
-         LEFT JOIN categories c ON a.category_id = c.id \
-         WHERE h.data_time >= ?1 AND h.data_time < ?2 \
-         GROUP BY COALESCE(c.name,'未分类'), h.data_time",
+/// 手动指派应用分类。
+pub fn set_app_category(conn: &Connection, app_id: i64, category_id: i64) -> rusqlite::Result<()> {
+    conn.execute(
+        "UPDATE apps SET category_id = ?1 WHERE id = ?2",
+        params![category_id, app_id],
     )?;
-    // group by category name in Rust
-    use std::collections::BTreeMap;
-    let mut map: BTreeMap<String, Vec<i64>> = BTreeMap::new();
-    let rows = stmt.query_map(params![date_ts, end], |r| {
-        Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?))
-    })?;
-    for row in rows.flatten() {
-        let (cat, hour_ts, secs) = row;
-        let hour = ((hour_ts - date_ts) / 3600) as usize;
-        let entry = map.entry(cat).or_insert(vec![0i64; 24]);
-        if hour < 24 {
-            entry[hour] += secs;
+    Ok(())
+}
+
+/// 柱状图粒度。
+#[derive(Clone, Copy, Debug)]
+pub enum BarGranularity {
+    Day,
+    Week,
+    Month,
+    Year,
+}
+
+impl BarGranularity {
+    /// 字符串 → enum（Tauri 命令从 JS 接收的 granularity）。
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "day" => Some(Self::Day),
+            "week" => Some(Self::Week),
+            "month" => Some(Self::Month),
+            "year" => Some(Self::Year),
+            _ => None,
         }
     }
-    Ok(map.into_iter().collect())
+
+    /// 该粒度下横轴的桶数。
+    pub fn n_buckets(self, start: i64, end: i64) -> usize {
+        match self {
+            Self::Day => 24,
+            Self::Week => 7,
+            Self::Month => (((end - start) / SECS_PER_DAY).max(1)) as usize,
+            Self::Year => 12,
+        }
+    }
+
+    /// 给定桶时间戳（hours_log.data_time 或 daily_log.date）+ 范围起点，算桶索引。
+    fn bucket_index(self, ts: i64, start: i64) -> usize {
+        match self {
+            Self::Day => ((ts - start) / 3600) as usize,
+            Self::Week | Self::Month => ((ts - start) / SECS_PER_DAY) as usize,
+            Self::Year => {
+                // 用 chrono 取月份（避免按 30 天估算偏差）。
+                let dt = chrono::Local.timestamp_opt(ts, 0).unwrap();
+                (dt.month() as usize).saturating_sub(1)
+            }
+        }
+    }
+}
+
+/// 柱状图范围聚合：按 `granularity` 分桶，返回每个应用的桶值列表 + "其他"。
+///
+/// 数据源：
+/// - Day → `hours_log`（按小时桶）
+/// - Week/Month/Year → `daily_log`（按天或月桶）
+///
+/// 返回顺序按范围内总时长降序，与 `get_app_rank` 一致（便于配色对齐）。
+pub fn get_stats_range(
+    conn: &Connection,
+    granularity: BarGranularity,
+    start: i64,
+    end: i64,
+    limit: usize,
+) -> rusqlite::Result<Vec<(String, Vec<i64>)>> {
+    let n = granularity.n_buckets(start, end);
+    let sql = match granularity {
+        BarGranularity::Day => {
+            "SELECT a.id, COALESCE(a.display_name, a.process_name), h.data_time, SUM(h.time) \
+             FROM hours_log h \
+             JOIN apps a ON h.app_id = a.id \
+             WHERE h.data_time >= ?1 AND h.data_time < ?2 \
+             GROUP BY a.id, h.data_time"
+        }
+        _ => {
+            "SELECT a.id, COALESCE(a.display_name, a.process_name), d.date, SUM(d.time) \
+             FROM daily_log d \
+             JOIN apps a ON d.app_id = a.id \
+             WHERE d.date >= ?1 AND d.date < ?2 \
+             GROUP BY a.id, d.date"
+        }
+    };
+    let mut stmt = conn.prepare(sql)?;
+    use std::collections::BTreeMap;
+    let mut apps_map: BTreeMap<i64, (String, Vec<i64>, i64)> = BTreeMap::new();
+    let rows = stmt.query_map(params![start, end], |r| {
+        Ok((
+            r.get::<_, i64>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, i64>(2)?,
+            r.get::<_, i64>(3)?,
+        ))
+    })?;
+    for row in rows.flatten() {
+        let (id, name, bucket_ts, secs) = row;
+        let idx = granularity.bucket_index(bucket_ts, start);
+        if idx >= n {
+            continue; // 防御性：超出范围的桶丢弃
+        }
+        let entry = apps_map.entry(id).or_insert((name, vec![0i64; n], 0));
+        entry.1[idx] += secs;
+        entry.2 += secs;
+    }
+    // 按范围内总时长降序，取 Top N，其余合并为"其他"。
+    let mut all: Vec<(String, Vec<i64>, i64)> = apps_map.into_values().collect();
+    all.sort_by(|a, b| b.2.cmp(&a.2));
+    let mut out: Vec<(String, Vec<i64>)> = Vec::new();
+    let mut other = vec![0i64; n];
+    for (i, (name, vals, _)) in all.into_iter().enumerate() {
+        if i < limit {
+            out.push((name, vals));
+        } else {
+            for j in 0..n {
+                other[j] += vals[j];
+            }
+        }
+    }
+    if out.is_empty() {
+        return Ok(vec![]);
+    }
+    if other.iter().any(|&v| v > 0) {
+        out.push(("其他".to_string(), other));
+    }
+    Ok(out)
 }
 
 /// 雷达图数据（分类对比，指定日期范围）。
@@ -450,7 +567,7 @@ pub fn get_stats_summary(conn: &Connection, start_ts: i64, end_ts: i64) -> rusql
         .flatten();
     let most_app: Option<String> = conn
         .query_row(
-            "SELECT a.display_name FROM daily_log d \
+            "SELECT COALESCE(a.display_name, a.process_name) FROM daily_log d \
              JOIN apps a ON d.app_id = a.id \
              WHERE d.date >= ?1 AND d.date < ?2 \
              GROUP BY a.id ORDER BY SUM(d.time) DESC LIMIT 1",

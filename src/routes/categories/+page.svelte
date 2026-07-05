@@ -82,8 +82,14 @@
   {:else}
     <div class="cat-grid">
       {#each cats as cat}
-        <div class="cat-card">
-          <div class="cat-head" style="background:{cat.color ?? '#5048E5'}">
+        <!-- 注入 --cat-color 自定义变量 -->
+        <div class="cat-card" style="--cat-color: {cat.color ?? '#5048E5'}">
+          <div class="cat-color-bar"></div>
+          <div class="cat-head">
+            <!-- 矢量 SVG 标签图标，继承分类色彩 -->
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" class="cat-tag-icon" style="color: var(--cat-color)">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M7 7h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
             <span class="cat-name">{cat.name}</span>
           </div>
           <div class="cat-body">
@@ -91,7 +97,7 @@
               <div class="cat-rules-label">规则</div>
               <div class="cat-rules">{cat.rules}</div>
             {:else}
-              <span style="font-family:'Segoe UI',sans-serif;font-size:0.4rem;color:#9A92C8">手动指派</span>
+              <span class="cat-manual-badge">手动指派</span>
             {/if}
           </div>
           <div class="cat-actions">
@@ -178,9 +184,11 @@
     border: 2px solid transparent;
     cursor: pointer;
     padding: 0;
+    transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.2s;
   }
 
-  .color-swatch.selected { border-color: theme('colors.text.primary'); }
+  .color-swatch:hover { transform: scale(1.1); }
+  .color-swatch.selected { border-color: theme('colors.text.primary'); transform: scale(1.15); }
 
   .form-actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 0.5rem; }
 
@@ -221,42 +229,85 @@
   .cat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 0.75rem; }
 
   .cat-card {
-    background: #FFFFFF;
-    border: 1px solid theme('colors.border');
-    border-radius: 4px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    position: relative;
+    border: 1px solid color-mix(in srgb, var(--cat-color, #5048E5) 12%, transparent);
+    background: linear-gradient(135deg, color-mix(in srgb, var(--cat-color, #5048E5) 6%, transparent) 0%, color-mix(in srgb, var(--cat-color, #5048E5) 1.5%, transparent) 100%);
+    border-radius: 8px;
     overflow: hidden;
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.25s, border-color 0.25s;
+    box-shadow: 0 4px 12px rgba(80,72,229,0.01), 0 1px 2px rgba(0,0,0,0.01);
+  }
+
+  .cat-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 8px 20px color-mix(in srgb, var(--cat-color, #5048E5) 8%, transparent);
+    border-color: color-mix(in srgb, var(--cat-color, #5048E5) 25%, transparent);
+  }
+
+  /* 顶部色彩窄横条 */
+  .cat-color-bar {
+    height: 4px;
+    width: 100%;
+    background: var(--cat-color, #5048E5);
   }
 
   .cat-head {
-    padding: 0.5rem 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.5rem 0.75rem 0.25rem 0.75rem;
+  }
+
+  .cat-tag-icon {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
   }
 
   .cat-name {
     font-family: 'Segoe UI Variable Display', 'Segoe UI', sans-serif;
     font-weight: 600;
     font-size: 0.65rem;
-    color: #FFFFFF;
+    color: theme('colors.text.primary');
   }
 
-  .cat-body { padding: 0.5rem 0.75rem; min-height: 32px; }
+  .cat-body { padding: 0.25rem 0.75rem 0.6rem 0.75rem; min-height: 40px; }
 
   .cat-rules-label {
     font-family: 'Segoe UI', sans-serif;
-    font-size: 0.4rem;
+    font-size: 0.5rem;
     color: theme('colors.text.tertiary');
-    margin-bottom: 2px;
+    margin-bottom: 3px;
   }
 
+  /* 代码徽章自适应配色 */
   .cat-rules {
+    display: inline-block;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 0.4rem;
-    color: theme('colors.text.secondary');
+    font-size: 0.48rem;
+    font-weight: 600;
+    color: var(--cat-color, #5048E5);
+    background: color-mix(in srgb, var(--cat-color, #5048E5) 7%, transparent);
+    padding: 0.08rem 0.3rem;
+    border-radius: 4px;
+    border: 1px solid color-mix(in srgb, var(--cat-color, #5048E5) 12%, transparent);
+  }
+
+  /* 手动指派徽章 */
+  .cat-manual-badge {
+    display: inline-block;
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 0.48rem;
+    color: theme('colors.text.tertiary');
+    background: #FAF9FD;
+    padding: 0.08rem 0.3rem;
+    border-radius: 4px;
+    border: 1px solid #ECE9F5;
   }
 
   .cat-actions {
     display: flex;
-    border-top: 1px solid theme('colors.heatmap.bg');
+    border-top: 1px solid color-mix(in srgb, var(--cat-color, #5048E5) 8%, transparent);
   }
 
   .cat-action-btn {
@@ -265,12 +316,20 @@
     border: none;
     background: none;
     font-family: 'Segoe UI', sans-serif;
-    font-size: 0.4rem;
-    color: theme('colors.text.secondary');
+    font-size: 0.5rem;
+    font-weight: 600;
+    color: color-mix(in srgb, var(--cat-color, #5048E5) 70%, #666);
     cursor: pointer;
+    transition: background 0.2s, color 0.2s;
   }
 
-  .cat-action-btn:hover { background: theme('colors.primary.hover'); color: theme('colors.primary.DEFAULT'); }
+  .cat-action-btn:hover {
+    background: color-mix(in srgb, var(--cat-color, #5048E5) 8%, transparent);
+    color: var(--cat-color, #5048E5);
+  }
 
-  .cat-action-danger:hover { background: rgba(229,57,53,0.08); color: #E53935; }
+  .cat-action-danger:hover {
+    background: rgba(229, 57, 53, 0.06);
+    color: #E53935;
+  }
 </style>

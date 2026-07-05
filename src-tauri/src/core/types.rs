@@ -38,7 +38,7 @@ pub struct AppItem {
     pub total_seconds: i64,
     pub category_name: Option<String>,
     pub category_color: Option<String>,
-    pub last_used_date: Option<u32>,
+    pub last_used_date: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]

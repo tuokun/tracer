@@ -6,11 +6,20 @@
   let flushInterval = $state('15');
   let autoStart = $state(false);
   let saving = $state(false);
+  let windowW = $state('960');
+  let windowH = $state('540');
+  let savingWin = $state(false);
 
   onMount(async () => {
     const f = await getConfigValue('flush_interval_secs');
     if (f) flushInterval = String(Math.floor(parseInt(f) / 60));
     autoStart = await isEnabled();
+    const ws = await getConfigValue('window_size');
+    if (ws) {
+      const [w, h] = ws.split(',');
+      if (w) windowW = w.trim();
+      if (h) windowH = h.trim();
+    }
   });
 
   async function saveFlush() {
@@ -26,6 +35,16 @@
     } else {
       await enable();
     }
+  }
+
+  async function saveWindowSize() {
+    savingWin = true;
+    const w = Math.max(400, parseInt(windowW) || 960);
+    const h = Math.max(300, parseInt(windowH) || 540);
+    windowW = String(w);
+    windowH = String(h);
+    await setConfigValue('window_size', `${w},${h}`);
+    savingWin = false;
   }
 </script>
 
@@ -68,6 +87,22 @@
           <input type="checkbox" bind:checked={autoStart} onchange={toggleAutoStart} />
           <span class="toggle-slider"></span>
         </label>
+      </div>
+    </div>
+    <div class="setting-divider"></div>
+    <div class="setting-row">
+      <div class="setting-info">
+        <div class="setting-name">窗口大小</div>
+        <div class="setting-desc">下次启动时生效（像素）</div>
+      </div>
+      <div class="setting-value">
+        <input class="setting-input" type="number" bind:value={windowW} min="400" />
+        <span class="setting-unit">×</span>
+        <input class="setting-input" type="number" bind:value={windowH} min="300" />
+        <span class="setting-unit">px</span>
+        <button class="setting-save" onclick={saveWindowSize} disabled={savingWin}>
+          {savingWin ? '...' : '保存'}
+        </button>
       </div>
     </div>
   </div>

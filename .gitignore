@@ -32,6 +32,8 @@ Thumbs.db
 .agents/
 .claude/
 .gitnexus/
+AGENTS.md
+CLAUDE.md
 
 # 上游参考源码
 /Tai/

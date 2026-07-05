@@ -7,7 +7,7 @@ use rusqlite::Connection;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager, WebviewUrl, WebviewWindowBuilder,
+    AppHandle, LogicalSize, Manager, WebviewUrl, WebviewWindowBuilder,
 };
 use tracing::info;
 
@@ -20,9 +20,10 @@ struct DbState {
     conn: Mutex<Connection>,
 }
 
-/// 当前前台会话（由 owner task 实时更新）。
+/// 当前前台会话 + 最近的非 tracer 会话（由 owner task 实时更新）。
 struct SessionState {
     inner: Arc<Mutex<Option<CurrentSession>>>,
+    last_active: Arc<Mutex<Option<CurrentSession>>>,
 }
 
 /// 图标存储目录 + 内存缓存。
@@ -44,32 +45,37 @@ fn get_current_session(
     db: tauri::State<DbState>,
     session: tauri::State<SessionState>,
 ) -> Result<CurrentSession, String> {
-    if let Ok(guard) = session.inner.lock() {
-        if let Some(mut sess) = guard.clone() {
+    let current = session.inner.lock().map_err(|e| e.to_string())?.clone();
+    let last = session.last_active.lock().map_err(|e| e.to_string())?.clone();
+    let mut sess = current.ok_or_else(|| "暂无前台会话".to_string())?;
+    sess.current_duration = chrono::Local::now().timestamp() - sess.start_timestamp;
+    // 是自身 tracer → 用上一次非 tracer 应用替代
+    if sess.process_name == "tracer.exe" {
+        if let Some(last_sess) = last {
+            sess = last_sess;
             sess.current_duration = chrono::Local::now().timestamp() - sess.start_timestamp;
-            // 尝试从 DB 补充 display_name
-            if sess.display_name.is_none() {
-                if let Ok(conn) = db.conn.lock() {
-                    sess.display_name = conn
-                        .query_row(
-                            "SELECT display_name FROM apps WHERE process_name=?1",
-                            rusqlite::params![sess.process_name],
-                            |r| r.get(0),
-                        )
-                        .ok()
-                        .flatten();
-                }
-            }
-            return Ok(sess);
         }
     }
-    Err("暂无前台会话".into())
+    // 尝试从 DB 补充 display_name
+    if sess.display_name.is_none() {
+        if let Ok(conn) = db.conn.lock() {
+            sess.display_name = conn
+                .query_row(
+                    "SELECT display_name FROM apps WHERE process_name=?1",
+                    rusqlite::params![sess.process_name],
+                    |r| r.get(0),
+                )
+                .ok()
+                .flatten();
+        }
+    }
+    Ok(sess)
 }
 
 #[tauri::command]
-fn get_app_rank(state: tauri::State<DbState>, date: i64, limit: Option<usize>) -> Result<Vec<AppRankItem>, String> {
+fn get_app_rank(state: tauri::State<DbState>, start: i64, end: i64, limit: Option<usize>) -> Result<Vec<AppRankItem>, String> {
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    repo::get_app_rank(&conn, date, limit.unwrap_or(10)).map_err(|e| e.to_string())
+    repo::get_app_rank(&conn, start, end, limit.unwrap_or(10)).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -114,9 +120,27 @@ fn delete_category(state: tauri::State<DbState>, id: i64) -> Result<(), String> 
 }
 
 #[tauri::command]
-fn get_stats_24h(state: tauri::State<DbState>, date: i64) -> Result<Vec<(String, Vec<i64>)>, String> {
+fn set_app_category(
+    state: tauri::State<DbState>,
+    app_id: i64,
+    category_id: i64,
+) -> Result<(), String> {
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    repo::get_stats_24h(&conn, date).map_err(|e| e.to_string())
+    repo::set_app_category(&conn, app_id, category_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_stats_range(
+    state: tauri::State<DbState>,
+    granularity: String,
+    start: i64,
+    end: i64,
+    limit: Option<usize>,
+) -> Result<Vec<(String, Vec<i64>)>, String> {
+    let g = core::repo::BarGranularity::from_str(&granularity)
+        .ok_or_else(|| format!("未知粒度: {granularity}"))?;
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::get_stats_range(&conn, g, start, end, limit.unwrap_or(5)).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -205,7 +229,7 @@ fn show_main_window(app: &AppHandle) {
     } else {
         let _ = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
             .title("Tracer")
-            .inner_size(800.0, 600.0)
+            .inner_size(960.0, 540.0)
             .build();
     }
 }
@@ -230,7 +254,8 @@ pub fn run() {
             save_category,
             delete_category,
             apply_category_rules,
-            get_stats_24h,
+            set_app_category,
+            get_stats_range,
             get_stats_radar,
             get_stats_pie,
             get_stats_summary,
@@ -247,6 +272,42 @@ pub fn run() {
             let db_path = data_dir.join("tracer.db");
             let write_conn = db::open(&db_path)?;
 
+            // 窗口大小还原 & 监听。
+            if let Some(win) = app.get_webview_window("main") {
+                let size_file = data_dir.join("window_size");
+                // 优先级：1) config 表里的 window_size → 2) 文件 → 3) 960×540 默认
+                let (sw, sh): (f64, f64) = {
+                    // 临时读取 config 表
+                    let cfg = db::open(&db_path).ok().and_then(|c| {
+                        c.query_row(
+                            "SELECT value FROM config WHERE key = 'window_size'",
+                            [],
+                            |r| r.get::<_, String>(0),
+                        ).ok()
+                    });
+                    if let Some(val) = cfg {
+                        if let Some((a, b)) = val.split_once(',') {
+                            let w = a.trim().parse().unwrap_or(960.0);
+                            let h = b.trim().parse().unwrap_or(540.0);
+                            if w > 0.0 && h > 0.0 { (w, h) } else { (960.0, 540.0) }
+                        } else { (960.0, 540.0) }
+                    } else if let Ok(s) = std::fs::read_to_string(&size_file) {
+                        if let Some(pos) = s.find('\n') {
+                            let w = s[..pos].trim().parse().unwrap_or(0.0);
+                            let h = s[pos + 1..].trim().parse().unwrap_or(0.0);
+                            if w > 0.0 && h > 0.0 { (w, h) } else { (960.0, 540.0) }
+                        } else { (960.0, 540.0) }
+                    } else { (960.0, 540.0) }
+                };
+                let _ = win.set_size(LogicalSize::new(sw, sh));
+                let sp = size_file.clone();
+                win.on_window_event(move |event| {
+                    if let tauri::WindowEvent::Resized(size) = event {
+                        let _ = std::fs::write(&sp, format!("{}\n{}", size.width, size.height));
+                    }
+                });
+            }
+
             // 图标缓存目录。
             let icon_dir = data_dir.join("icons");
             std::fs::create_dir_all(&icon_dir)?;
@@ -260,11 +321,13 @@ pub fn run() {
 
             // 当前会话状态（owner task 写，Tauri 命令读）。
             let session_state = Arc::new(Mutex::new(None::<CurrentSession>));
+            let last_active = Arc::new(Mutex::new(None::<CurrentSession>));
             app.manage(SessionState {
                 inner: session_state.clone(),
+                last_active: last_active.clone(),
             });
 
-            core::owner::spawn(rx, write_conn, session_state);
+            core::owner::spawn(rx, write_conn, session_state, last_active);
             core::tracker::spawn(tx.clone());
             core::power::spawn(tx);
 

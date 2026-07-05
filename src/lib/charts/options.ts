@@ -1,5 +1,6 @@
 import { formatDuration } from '$lib/utils/time';
 import { CATEGORY_COLORS } from '$lib/utils/colors';
+import { appDisplayName, stripExe } from '$lib/utils/format';
 import type { AppRankItem, RadarPoint, PieSlice } from '$lib/api/types';
 
 /** 仪表盘 24h 热力柱形图 */
@@ -38,7 +39,7 @@ export function buildRingOption(items: AppRankItem[]): Record<string, unknown> {
     series: [{
       type: 'pie', radius: ['50%', '75%'], center: ['50%', '50%'],
       data: items.map((item, i) => ({
-        name: item.display_name ?? item.process_name,
+        name: appDisplayName(item.display_name, item.process_name),
         value: item.total_seconds,
         itemStyle: { color: CATEGORY_COLORS[i % CATEGORY_COLORS.length] },
       })),
@@ -55,22 +56,24 @@ export function buildRingOption(items: AppRankItem[]): Record<string, unknown> {
   };
 }
 
-/** 统计分析 24h 堆叠柱形图 */
-export function buildBarOption(data: [string, number[]][]): Record<string, unknown> {
-  const cats = Array.from({ length: 24 }, (_, i) => `${String(i).padStart(2, '0')}:00`);
+/** 统计分析堆叠柱形图（多粒度）。`labels` 是横轴标签数组，长度 = 桶数。 */
+export function buildBarOption(data: [string, number[]][], labels: string[]): Record<string, unknown> {
   return {
     tooltip: { trigger: 'axis' },
-    legend: { show: data.length > 1, bottom: 0, textStyle: { fontSize: 9, color: '#6A62A0' } },
-    grid: { left: 36, right: 8, top: 8, bottom: data.length > 1 ? 28 : 8 },
-    xAxis: { type: 'category', data: cats, axisLabel: { fontSize: 8, color: '#9A92C8' }, axisLine: { show: false }, axisTick: { show: false } },
+    legend: { show: data.length > 1, top: 0, itemWidth: 8, itemHeight: 8, textStyle: { fontSize: 9, color: '#6A62A0' } },
+    grid: { left: 36, right: 8, top: data.length > 1 ? 28 : 8, bottom: 20 },
+    xAxis: { type: 'category', data: labels, axisLabel: { fontSize: 8, color: '#9A92C8' }, axisLine: { show: false }, axisTick: { show: false } },
     yAxis: { type: 'value', splitLine: { lineStyle: { color: '#F0ECF8' } }, axisLabel: { fontSize: 8, color: '#9A92C8' } },
     series: data.length > 0
-      ? data.map(([name, vals]) => ({
-          name, type: 'bar', stack: 'total',
-          data: vals.map(v => Math.round(v / 60)),
-          itemStyle: { color: name === '未分类' ? '#9A92C8' : '#5048E5', borderRadius: [1, 1, 0, 0] },
-        }))
-      : [{ type: 'bar', data: [], itemStyle: { color: '#5048E5' } }],
+      ? data.map(([name, vals], i) => {
+          const isOther = name === '其他';
+          return {
+            name: stripExe(name), type: 'bar', stack: 'total',
+            data: vals.map(v => Math.round(v / 60)),
+            itemStyle: { color: isOther ? '#9A92C8' : CATEGORY_COLORS[i % CATEGORY_COLORS.length], borderRadius: [1, 1, 0, 0] },
+          };
+        })
+      : [{ type: 'bar', data: [], itemStyle: { color: CATEGORY_COLORS[0] } }],
   };
 }
 
