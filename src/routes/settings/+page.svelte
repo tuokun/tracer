@@ -109,11 +109,11 @@
 </div>
 
 <style>
-  .page { max-width: 700px; }
+  .page { max-width: 600px; margin: 0 auto; }
 
   .page-title {
     font-family: 'Segoe UI Variable Display', 'Segoe UI', sans-serif;
-    font-weight: 600;
+    font-weight: 700;
     font-size: 0.85rem;
     color: theme('colors.text.primary');
     margin: 0;
@@ -123,88 +123,160 @@
     font-family: 'Segoe UI', sans-serif;
     font-size: 0.5rem;
     color: theme('colors.text.secondary');
-    margin-top: 0.125rem;
-    margin-bottom: 1rem;
+    margin-top: 0.15rem;
+    margin-bottom: 0.85rem;
   }
 
   .card {
-    padding: 0.75rem 1rem;
+    padding: 0.85rem 1.15rem;
+    background: #FFFFFF;
+    border: 1px solid rgba(80, 72, 229, 0.08);
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(80, 72, 229, 0.03), 0 1px 3px rgba(0, 0, 0, 0.01);
   }
 
   .setting-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0.75rem 0;
+    padding: 0.85rem 0;
   }
 
-  .setting-info { display: flex; flex-direction: column; gap: 0.125rem; }
+  .setting-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
 
   .setting-name {
     font-family: 'Segoe UI', sans-serif;
-    font-size: 0.5rem;
-    font-weight: 600;
-    color: theme('colors.text.primary');
+    font-size: 0.55rem;
+    font-weight: 700;
+    color: #000000;
   }
 
   .setting-desc {
     font-family: 'Segoe UI', sans-serif;
-    font-size: 0.4rem;
-    color: theme('colors.text.tertiary');
+    font-size: 0.45rem;
+    color: theme('colors.text.secondary');
   }
 
   .setting-value {
     display: flex;
     align-items: center;
-    gap: 0.375rem;
+    gap: 0.45rem;
   }
 
   .setting-input {
-    width: 50px;
-    padding: 0.25rem 0.375rem;
-    border-radius: 4px;
-    border: 1px solid theme('colors.border');
+    width: 65px;
+    padding: 0.25rem 0.45rem;
+    border-radius: 6px;
+    border: 1px solid #ECE9F5;
+    background: #FAF9FD;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 0.5rem;
-    color: theme('colors.text.primary');
+    font-size: 0.52rem;
+    font-weight: 600;
+    color: #000000;
     text-align: center;
     outline: none;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
-  .setting-input:focus { border-color: #5048E5; }
+  .setting-input:focus {
+    border-color: color-mix(in srgb, theme('colors.primary.DEFAULT') 50%, transparent);
+    background: #FFFFFF;
+    box-shadow: 0 0 0 3px color-mix(in srgb, theme('colors.primary.DEFAULT') 8%, transparent);
+  }
 
   .setting-unit {
     font-family: 'Segoe UI', sans-serif;
     font-size: 0.5rem;
+    font-weight: 600;
     color: theme('colors.text.secondary');
   }
 
   .setting-save {
-    padding: 0.25rem 0.5rem;
-    border-radius: 4px;
+    padding: 0.25rem 0.65rem;
+    border-radius: 6px;
     border: none;
-    background: theme('colors.primary.DEFAULT');
+    background: linear-gradient(135deg, theme('colors.primary.DEFAULT') 0%, color-mix(in srgb, theme('colors.primary.DEFAULT') 82%, #000) 100%);
     color: #FFFFFF;
     font-family: 'Segoe UI', sans-serif;
-    font-size: 0.4rem;
+    font-size: 0.45rem;
+    font-weight: 600;
     cursor: pointer;
+    box-shadow: 0 2px 6px color-mix(in srgb, theme('colors.primary.DEFAULT') 12%, transparent);
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
-  .setting-save:hover { opacity: 0.9; }
-  .setting-save:disabled { opacity: 0.5; }
+  .setting-save:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px color-mix(in srgb, theme('colors.primary.DEFAULT') 20%, transparent);
+  }
+
+  .setting-save:active:not(:disabled) {
+    transform: translateY(0.5px);
+  }
+
+  .setting-save:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    box-shadow: none;
+  }
 
   .setting-static {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 0.5rem;
+    font-size: 0.52rem;
+    font-weight: 600;
     color: theme('colors.text.secondary');
   }
 
-  .setting-divider { height: 1px; background: theme('colors.border'); }
+  .setting-divider {
+    height: 1px;
+    background: linear-gradient(to right, rgba(80, 72, 229, 0.08) 0%, rgba(80, 72, 229, 0.01) 100%);
+  }
 
-  .toggle { display: inline-flex; align-items: center; cursor: pointer; }
-  .toggle input { display: none; }
-  .toggle-slider { width: 28px; height: 16px; background: #D0C8E0; border-radius: 8px; position: relative; transition: 0.2s; }
-  .toggle-slider::after { content:''; position:absolute; top:2px; left:2px; width:12px; height:12px; border-radius:50%; background:#fff; transition:0.2s; }
-  .toggle input:checked + .toggle-slider { background: theme('colors.primary.DEFAULT'); }
-  .toggle input:checked + .toggle-slider::after { left:14px; }
+  .toggle {
+    display: inline-flex;
+    align-items: center;
+    cursor: pointer;
+  }
+  
+  .toggle input {
+    display: none;
+  }
+  
+  .toggle-slider {
+    width: 34px;
+    height: 18px;
+    background: #ECE9F5;
+    border-radius: 9px;
+    position: relative;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  
+  .toggle-slider::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #FFFFFF;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  
+  .toggle input:checked + .toggle-slider {
+    background: theme('colors.primary.DEFAULT');
+  }
+  
+  .toggle input:checked + .toggle-slider::after {
+    left: 18px;
+  }
+
+  .toggle:hover .toggle-slider {
+    box-shadow: 0 0 0 2px color-mix(in srgb, theme('colors.primary.DEFAULT') 8%, transparent);
+  }
 </style>

@@ -90,9 +90,19 @@ fn get_app_list(
     search: Option<String>,
     category_id: Option<i64>,
     sort: Option<String>,
+    start_ts: Option<i64>,
+    end_ts: Option<i64>,
 ) -> Result<Vec<AppItem>, String> {
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    repo::get_app_list(&conn, search.as_deref(), category_id, sort.as_deref()).map_err(|e| e.to_string())
+    repo::get_app_list(
+        &conn,
+        search.as_deref(),
+        category_id,
+        sort.as_deref(),
+        start_ts,
+        end_ts,
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

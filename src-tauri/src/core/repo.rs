@@ -265,42 +265,55 @@ pub fn get_hourly_heatmap(conn: &Connection, date_ts: i64) -> rusqlite::Result<V
     Ok(out)
 }
 
-/// 应用列表（含搜索/分类过滤/排序）。
+/// 应用列表（含搜索/分类过滤/排序/起止时间过滤）。
 pub fn get_app_list(
     conn: &Connection,
     search: Option<&str>,
     category_id: Option<i64>,
     sort_by: Option<&str>,
+    start_ts: Option<i64>,
+    end_ts: Option<i64>,
 ) -> rusqlite::Result<Vec<AppItem>> {
-    let mut sql = String::from(
-        "SELECT a.id, a.process_name, a.display_name, a.executable_path, \
-                a.icon_path, a.total_time, c.name, c.color, \
-                (SELECT MAX(date) FROM daily_log WHERE app_id = a.id) \
-         FROM apps a \
-         LEFT JOIN categories c ON a.category_id = c.id \
-         WHERE 1=1",
-    );
+    let mut sql = String::new();
     let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-    if let Some(s) = search {
-        if !s.is_empty() {
-            sql.push_str(" AND (a.process_name LIKE ? OR a.display_name LIKE ?)");
-            let pat = format!("%{}%", s);
-            params_vec.push(Box::new(pat.clone()));
-            params_vec.push(Box::new(pat));
-        }
-    }
-    if let Some(cid) = category_id {
-        if cid >= 0 {
-            sql.push_str(" AND a.category_id = ?");
-            params_vec.push(Box::new(cid));
-        }
+
+    // 仅当起止时间都给定时按 daily_log 聚合；只传一个退化为累计模式。
+    let is_range = matches!((start_ts, end_ts), (Some(_), Some(_)));
+    // 排序字段：范围模式按 SUM(d.time) 别名 range_time；累计模式按 apps.total_time。
+    let sort_field = match sort_by {
+        Some("name") => "a.process_name ASC",
+        _ if is_range => "range_time DESC",
+        _ => "a.total_time DESC",
+    };
+
+    if is_range {
+        sql.push_str(
+            "SELECT a.id, a.process_name, a.display_name, a.executable_path, \
+                    a.icon_path, SUM(d.time) as range_time, c.name, c.color, \
+                    MAX(d.date) \
+             FROM daily_log d \
+             JOIN apps a ON d.app_id = a.id \
+             LEFT JOIN categories c ON a.category_id = c.id \
+             WHERE d.date >= ? AND d.date < ?"
+        );
+        params_vec.push(Box::new(start_ts.unwrap()));
+        params_vec.push(Box::new(end_ts.unwrap()));
+        push_app_filters(&mut sql, &mut params_vec, search, category_id);
+        sql.push_str(" GROUP BY a.id");
+    } else {
+        sql.push_str(
+            "SELECT a.id, a.process_name, a.display_name, a.executable_path, \
+                    a.icon_path, a.total_time, c.name, c.color, \
+                    (SELECT MAX(date) FROM daily_log WHERE app_id = a.id) \
+             FROM apps a \
+             LEFT JOIN categories c ON a.category_id = c.id \
+             WHERE 1=1"
+        );
+        push_app_filters(&mut sql, &mut params_vec, search, category_id);
     }
     sql.push_str(" ORDER BY ");
-    match sort_by {
-        Some("name") => sql.push_str("a.process_name ASC"),
-        Some("time") => sql.push_str("a.total_time DESC"),
-        _ => sql.push_str("a.total_time DESC"),
-    }
+    sql.push_str(sort_field);
+
     let mut stmt = conn.prepare(&sql)?;
     let refs: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
     let rows = stmt.query_map(refs.as_slice(), |r| {
@@ -317,6 +330,30 @@ pub fn get_app_list(
         })
     })?;
     rows.collect()
+}
+
+/// 追加应用搜索/分类过滤的 WHERE 片段（`AND (process_name LIKE ? OR display_name LIKE ?)`、
+/// `AND a.category_id = ?`）到 SQL 与参数列表。供 `get_app_list` 两种数据源分支共用。
+fn push_app_filters(
+    sql: &mut String,
+    params: &mut Vec<Box<dyn rusqlite::types::ToSql>>,
+    search: Option<&str>,
+    category_id: Option<i64>,
+) {
+    if let Some(s) = search {
+        if !s.is_empty() {
+            sql.push_str(" AND (a.process_name LIKE ? OR a.display_name LIKE ?)");
+            let pat = format!("%{}%", s);
+            params.push(Box::new(pat.clone()));
+            params.push(Box::new(pat));
+        }
+    }
+    if let Some(cid) = category_id {
+        if cid >= 0 {
+            sql.push_str(" AND a.category_id = ?");
+            params.push(Box::new(cid));
+        }
+    }
 }
 
 /// 全部分类。

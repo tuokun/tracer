@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { getAppList, getAppIcon, getCategories, setAppCategory } from '$lib/api/commands';
-  import { formatDuration } from '$lib/utils/time';
+  import { formatDuration, startOfDay, rangeForPeriod, shiftCursorForPeriod } from '$lib/utils/time';
+  import type { Period as BasePeriod } from '$lib/utils/time';
   import { appDisplayName } from '$lib/utils/format';
   import type { AppItem, CategoryItem } from '$lib/api/types';
 
@@ -10,6 +11,11 @@
   let search = $state('');
   let sort = $state('time');
   let iconCache = $state(new Map<string, string>());
+
+  // 时间段与日期游标状态（'all' = 历史累计，不参与范围计算）
+  type AppPeriod = BasePeriod | 'all';
+  let period = $state<AppPeriod>('day');
+  let cursorTs = $state(startOfDay(Date.now() / 1000));
 
   // 自定义右键菜单状态
   let contextMenu = $state<{
@@ -25,9 +31,40 @@
     await loadApps();
   });
 
+  let periodLabel = $derived.by(() => {
+    if (period === 'all') return '历史累计全部';
+    const d = new Date(cursorTs * 1000);
+    if (period === 'day') {
+      return d.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'short' });
+    }
+    if (period === 'week') {
+      const range = rangeForPeriod(period, cursorTs);
+      const s = new Date(range.start * 1000);
+      const e = new Date((range.end - 1) * 1000);
+      return `${s.getMonth() + 1}月${s.getDate()}日 - ${e.getMonth() + 1}月${e.getDate()}日`;
+    }
+    if (period === 'month') {
+      return d.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long' });
+    }
+    return `${d.getFullYear()}年`;
+  });
+
   async function loadApps() {
-    apps = await getAppList(search || undefined, undefined, sort);
+    const range = period === 'all' ? undefined : rangeForPeriod(period, cursorTs);
+    apps = await getAppList(search || undefined, undefined, sort, range?.start, range?.end);
     await loadIcons();
+  }
+
+  function shiftCursor(direction: -1 | 1) {
+    if (period === 'all') return;
+    cursorTs = shiftCursorForPeriod(period, cursorTs, direction);
+    loadApps();
+  }
+
+  function setPeriod(p: AppPeriod) {
+    period = p;
+    cursorTs = startOfDay(Date.now() / 1000);
+    loadApps();
   }
 
   async function loadIcons() {
@@ -82,15 +119,67 @@
 <svelte:window onclick={closeContextMenu} oncontextmenu={closeContextMenu} />
 
 <div class="page">
-  <h1 class="page-title">应用列表</h1>
-  <p class="page-desc">所有已追踪的应用</p>
+  <div class="header-strip">
+    <div class="header-left">
+      <h1 class="page-title">应用列表</h1>
+      <p class="page-desc">
+        {#if period === 'all'}
+          所有已追踪的应用列表（历史累计）
+        {:else}
+          时间跨度：{periodLabel} 的活跃应用情况
+        {/if}
+      </p>
+    </div>
+
+    <!-- 顶栏时间段控制器与翻页器 -->
+    <div class="header-controls">
+      <!-- 迷你左右翻页导航器 -->
+      {#if period !== 'all'}
+        <div class="date-navigator-mini">
+          <button class="nav-btn-mini" onclick={() => shiftCursor(-1)} title="前一个周期">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
+            </svg>
+          </button>
+          <span class="date-label-mini">{periodLabel}</span>
+          <button class="nav-btn-mini" onclick={() => shiftCursor(1)} title="后一个周期">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+            </svg>
+          </button>
+        </div>
+      {/if}
+
+      <!-- 时间段 Segmented 切换器 -->
+      <div class="period-switcher">
+        <button class:active={period === 'day'} onclick={() => setPeriod('day')}>天</button>
+        <button class:active={period === 'week'} onclick={() => setPeriod('week')}>周</button>
+        <button class:active={period === 'month'} onclick={() => setPeriod('month')}>月</button>
+        <button class:active={period === 'year'} onclick={() => setPeriod('year')}>年</button>
+        <button class:active={period === 'all'} onclick={() => setPeriod('all')}>全部</button>
+      </div>
+    </div>
+  </div>
 
   <div class="toolbar">
-    <input class="search-input" type="text" placeholder="搜索应用..." value={search} oninput={onSearch} />
-    <select class="filter-select" bind:value={sort} onchange={loadApps}>
-      <option value="time">按时长</option>
-      <option value="name">按名称</option>
-    </select>
+    <!-- 美化搜索框：包含放大镜 SVG -->
+    <div class="search-wrapper">
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" class="search-icon">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+      </svg>
+      <input class="search-input" type="text" placeholder="搜索应用..." value={search} oninput={onSearch} />
+    </div>
+
+    <!-- 美化排序下拉框：包含向下的箭头 SVG -->
+    <div class="filter-wrapper">
+      <select class="filter-select" bind:value={sort} onchange={loadApps}>
+        <option value="time">按时长排序</option>
+        <option value="name">按名称排序</option>
+      </select>
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3.5" class="filter-arrow">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+      </svg>
+    </div>
   </div>
 
   <div class="card">
@@ -197,50 +286,220 @@
 <style>
   .page { max-width: 1000px; }
 
-  .page-title {
-    font-family: 'Segoe UI Variable Display', 'Segoe UI', sans-serif;
-    font-weight: 600;
-    font-size: 0.85rem;
-    color: theme('colors.text.primary');
-    margin: 0;
+  .header-strip {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.85rem;
+    width: 100%;
   }
 
-  .page-desc {
+  .header-left {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+  }
+
+  .page-title { font-family: 'Segoe UI Variable Display','Segoe UI',sans-serif; font-weight: 600; font-size: 0.85rem; color: theme('colors.text.primary'); margin: 0; }
+  .page-desc { font-family: 'Segoe UI',sans-serif; font-size: 0.45rem; color: theme('colors.text.tertiary'); margin: 0; }
+
+  .header-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
+
+  /* Segmented Control 切换器样式 */
+  .period-switcher {
+    display: flex;
+    background: #FAF9FD;
+    border: 1px solid #ECE9F5;
+    border-radius: 6px;
+    padding: 0.08rem;
+    gap: 0.05rem;
+  }
+
+  .period-switcher button {
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 0.52rem;
+    font-weight: 600;
+    color: theme('colors.text.secondary');
+    border: none;
+    background: transparent;
+    padding: 0.2rem 0.55rem;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .period-switcher button:hover {
+    color: theme('colors.primary.DEFAULT');
+    background: rgba(80, 72, 229, 0.03);
+  }
+
+  .period-switcher button.active {
+    background: #FFFFFF;
+    color: theme('colors.primary.DEFAULT');
+    box-shadow: 0 1px 3px rgba(80, 72, 229, 0.12), 0 1px 2px rgba(0, 0, 0, 0.02);
+  }
+
+  /* 迷你翻页导航器样式 */
+  .date-navigator-mini {
+    display: flex;
+    align-items: center;
+    background: #FAF9FD;
+    border: 1px solid #ECE9F5;
+    border-radius: 6px;
+    padding: 0.12rem 0.25rem;
+    gap: 0.3rem;
+  }
+
+  .nav-btn-mini {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+    color: theme('colors.text.secondary');
+    transition: all 0.2s;
+    padding: 0;
+  }
+
+  .nav-btn-mini:hover {
+    background: rgba(80, 72, 229, 0.05);
+    color: theme('colors.primary.DEFAULT');
+  }
+
+  .nav-btn-mini svg {
+    width: 12px;
+    height: 12px;
+  }
+
+  .date-label-mini {
     font-family: 'Segoe UI', sans-serif;
     font-size: 0.5rem;
-    color: theme('colors.text.secondary');
-    margin-top: 0.125rem;
-    margin-bottom: 1rem;
+    font-weight: 700;
+    color: theme('colors.text.primary');
+    min-width: 95px;
+    text-align: center;
+    white-space: nowrap;
   }
 
-  .toolbar { display: flex; gap: 0.75rem; margin-bottom: 1rem; }
+  .toolbar {
+    display: flex;
+    gap: 0.6rem;
+    margin-bottom: 0.85rem;
+    width: 100%;
+  }
+
+  /* 搜索框包装器 */
+  .search-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+    flex: 1;
+  }
+
+  .search-icon {
+    position: absolute;
+    left: 0.55rem;
+    width: 13px;
+    height: 13px;
+    color: theme('colors.text.tertiary');
+    pointer-events: none;
+    transition: color 0.2s;
+  }
 
   .search-input {
-    flex: 1;
-    padding: 0.375rem 0.75rem;
-    border-radius: 4px;
-    border: 1px solid theme('colors.border');
-    background: #FFFFFF;
+    width: 100%;
+    padding: 0.25rem 0.5rem 0.25rem 1.4rem;
+    border-radius: 6px;
+    border: 1px solid #ECE9F5;
+    background: #FAF9FD;
     font-family: 'Segoe UI', sans-serif;
-    font-size: 0.5rem;
+    font-size: 0.48rem;
+    font-weight: 500;
     color: theme('colors.text.primary');
     outline: none;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
-  .search-input:focus { border-color: #5048E5; }
+  .search-input::placeholder {
+    color: theme('colors.text.tertiary');
+    opacity: 0.85;
+  }
+
+  .search-input:focus {
+    border-color: color-mix(in srgb, theme('colors.primary.DEFAULT') 50%, transparent);
+    background: #FFFFFF;
+    box-shadow: 0 0 0 3px color-mix(in srgb, theme('colors.primary.DEFAULT') 8%, transparent);
+  }
+
+  .search-wrapper:focus-within .search-icon {
+    color: theme('colors.primary.DEFAULT');
+  }
+
+  /* 排序下拉框包装器 */
+  .filter-wrapper {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    width: 110px;
+    flex-shrink: 0;
+  }
 
   .filter-select {
-    padding: 0.375rem 0.75rem;
-    border-radius: 4px;
-    border: 1px solid theme('colors.border');
-    background: #FFFFFF;
+    width: 100%;
+    padding: 0.25rem 0.8rem 0.25rem 0.45rem;
+    border-radius: 6px;
+    border: 1px solid #ECE9F5;
+    background: #FAF9FD;
     font-family: 'Segoe UI', sans-serif;
-    font-size: 0.5rem;
+    font-size: 0.48rem;
+    font-weight: 600;
     color: theme('colors.text.secondary');
     outline: none;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    text-align: left;
   }
 
-  .filter-select:focus { border-color: #5048E5; }
+  .filter-select:hover {
+    border-color: color-mix(in srgb, theme('colors.primary.DEFAULT') 35%, transparent);
+    color: theme('colors.primary.DEFAULT');
+  }
+
+  .filter-select:focus {
+    border-color: color-mix(in srgb, theme('colors.primary.DEFAULT') 50%, transparent);
+    background: #FFFFFF;
+    color: theme('colors.primary.DEFAULT');
+    box-shadow: 0 0 0 3px color-mix(in srgb, theme('colors.primary.DEFAULT') 8%, transparent);
+  }
+
+  .filter-arrow {
+    position: absolute;
+    right: 0.35rem;
+    width: 8px;
+    height: 8px;
+    color: theme('colors.text.tertiary');
+    pointer-events: none;
+    transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), color 0.2s;
+  }
+
+  .filter-wrapper:hover .filter-arrow {
+    color: theme('colors.primary.DEFAULT');
+  }
+
+  .filter-wrapper:focus-within .filter-arrow {
+    transform: rotate(180deg);
+    color: theme('colors.primary.DEFAULT');
+  }
 
   .table-header {
     display: flex;
@@ -293,10 +552,8 @@
     z-index: 1000;
     min-width: 150px;
     max-width: 220px;
-    background: rgba(255, 255, 255, 0.85);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid rgba(80, 72, 229, 0.12);
+    background: #FFFFFF;
+    border: 1px solid rgba(80, 72, 229, 0.15);
     border-radius: 8px;
     box-shadow: 0 10px 25px rgba(80, 72, 229, 0.08), 0 3px 6px rgba(0, 0, 0, 0.02);
     padding: 0.25rem 0;
@@ -310,10 +567,10 @@
 
   .menu-header {
     font-family: 'Segoe UI', sans-serif;
-    font-size: 0.42rem;
-    font-weight: 600;
-    color: theme('colors.text.tertiary');
-    padding: 0.2rem 0.5rem;
+    font-size: 0.45rem;
+    font-weight: 700;
+    color: #000000;
+    padding: 0.25rem 0.5rem;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -372,19 +629,19 @@
   .menu-icon {
     width: 12px;
     height: 12px;
-    color: theme('colors.text.secondary');
+    color: #000000;
     flex-shrink: 0;
   }
 
   .menu-item:hover .menu-icon {
-    color: theme('colors.primary.DEFAULT');
+    color: #000000;
   }
 
   .menu-item-text {
     font-family: 'Segoe UI', sans-serif;
     font-size: 0.45rem;
-    font-weight: 500;
-    color: theme('colors.text.secondary');
+    font-weight: 600;
+    color: #000000;
     transition: transform 0.2s;
     white-space: nowrap;
     overflow: hidden;
@@ -392,7 +649,7 @@
   }
 
   .menu-item:hover .menu-item-text {
-    color: theme('colors.primary.DEFAULT');
+    color: #000000;
     transform: translateX(1.5px);
   }
 
@@ -408,9 +665,6 @@
     border: 1px dashed #999;
   }
 
-  .clear-btn:hover .menu-item-text {
-    color: #E53935;
-  }
   .clear-btn:hover {
     background: rgba(229, 57, 53, 0.04);
   }
@@ -423,13 +677,13 @@
   .submenu-arrow {
     width: 8px;
     height: 8px;
-    color: theme('colors.text.tertiary');
+    color: #000000;
     flex-shrink: 0;
     transition: transform 0.2s, color 0.2s;
   }
 
   .has-submenu:hover .submenu-arrow {
-    color: theme('colors.primary.DEFAULT');
+    color: #000000;
     transform: translateX(1px);
   }
 

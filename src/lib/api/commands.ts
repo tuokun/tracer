@@ -25,9 +25,19 @@ export async function getHourlyHeatmap(date: number): Promise<number[]> {
 }
 
 export async function getAppList(
-  search?: string, categoryId?: number, sort?: string
+  search?: string,
+  categoryId?: number,
+  sort?: string,
+  startTs?: number,
+  endTs?: number
 ): Promise<AppItem[]> {
-  return invoke('get_app_list', { search, categoryId, sort });
+  return invoke('get_app_list', {
+    search,
+    categoryId,
+    sort,
+    startTs,
+    endTs,
+  });
 }
 
 export async function getCategories(): Promise<CategoryItem[]> {

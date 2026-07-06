@@ -4,7 +4,7 @@
   import {
     getStatsRange, getStatsRadar, getStatsPie, getAppRank, getAppIcon
   } from '$lib/api/commands';
-  import { formatDuration, todayTimestamp, startOfDay } from '$lib/utils/time';
+  import { formatDuration, todayTimestamp, rangeForPeriod, shiftCursorForPeriod } from '$lib/utils/time';
   import { appDisplayName } from '$lib/utils/format';
   import { CATEGORY_COLORS } from '$lib/utils/colors';
   import { buildBarOption, buildRadarOption, buildPieOption } from '$lib/charts/options';
@@ -40,7 +40,7 @@
   }
 
   async function loadData() {
-    const { start, end } = rangeTs();
+    const { start, end } = rangeForPeriod(granularity, cursorTs);
     barLabels = buildLabels(granularity, start, end);
     [barData, radarPoints, pieSlices, topApps] = await Promise.all([
       getStatsRange(granularity, start, end, 5),
@@ -67,26 +67,6 @@
     if (changed) iconCache = new Map(iconCache);
   }
 
-  function rangeTs(): { start: number; end: number } {
-    const d = new Date(cursorTs * 1000);
-    if (granularity === 'day') {
-      return { start: cursorTs, end: cursorTs + 86400 };
-    }
-    if (granularity === 'week') {
-      const dow = d.getDay();
-      const mon = cursorTs - (dow === 0 ? 6 : dow - 1) * 86400;
-      return { start: startOfDay(mon), end: startOfDay(mon) + 7 * 86400 };
-    }
-    if (granularity === 'month') {
-      const start = new Date(d.getFullYear(), d.getMonth(), 1).getTime() / 1000;
-      const end = new Date(d.getFullYear(), d.getMonth() + 1, 1).getTime() / 1000;
-      return { start: startOfDay(start), end: startOfDay(end) };
-    }
-    const start = new Date(d.getFullYear(), 0, 1).getTime() / 1000;
-    const end = new Date(d.getFullYear() + 1, 0, 1).getTime() / 1000;
-    return { start: startOfDay(start), end: startOfDay(end) };
-  }
-
   function setGran(g: Granularity) {
     granularity = g;
     cursorTs = todayTimestamp();
@@ -94,13 +74,12 @@
   }
 
   function nav(delta: number) {
-    const factor = granularity === 'day' ? 86400 : granularity === 'week' ? 86400 * 7 : granularity === 'month' ? 86400 * 30 : 86400 * 365;
-    cursorTs += delta * factor;
+    cursorTs = shiftCursorForPeriod(granularity, cursorTs, delta);
     loadData();
   }
 
   function rangeLabel(): string {
-    const { start, end } = rangeTs();
+    const { start, end } = rangeForPeriod(granularity, cursorTs);
     const s = new Date(start * 1000);
     const e = new Date((end - 86400) * 1000);
     if (granularity === 'day') return s.toLocaleDateString('zh-CN');
