@@ -80,21 +80,42 @@ export function buildBarOption(data: [string, number[]][], labels: string[]): Re
 /** 分析页分类雷达图 */
 export function buildRadarOption(points: RadarPoint[]): Record<string, unknown> {
   if (!points.length) return {};
+  const maxVal = Math.max(...points.map(x => x.value), 1);
   return {
     tooltip: { trigger: 'item' },
     radar: {
-      indicator: points.map(p => ({ name: p.name.length > 4 ? p.name.slice(0, 4) : p.name, max: Math.max(...points.map(x => x.value), 1) })),
-      axisName: { color: '#6A62A0', fontSize: 9 },
+      indicator: points.map(p => ({
+        name: p.name.length > 4 ? p.name.slice(0, 4) : p.name,
+        max: maxVal,
+        color: p.color || '#6A62A0'
+      })),
+      axisName: { fontSize: 12, fontWeight: 'bold' },
       splitArea: { areaStyle: { color: ['rgba(80,72,229,0.02)', 'rgba(80,72,229,0.04)'] } },
       splitLine: { lineStyle: { color: '#E0DCF0' } },
       axisLine: { lineStyle: { color: '#E0DCF0' } },
     },
-    series: [{
-      type: 'radar', data: [{ value: points.map(p => p.value), name: '使用时长' }],
-      areaStyle: { color: 'rgba(80,72,229,0.15)' },
-      lineStyle: { color: '#5048E5', width: 1 },
-      itemStyle: { color: '#5048E5' },
-    }],
+    series: [
+      {
+        type: 'radar',
+        data: [{ value: points.map(p => p.value), name: '使用时长' }],
+        areaStyle: { color: 'rgba(80,72,229,0.18)' },
+        lineStyle: { color: '#5048E5', width: 1 },
+        itemStyle: { color: '#5048E5' },
+        symbol: 'circle',
+        symbolSize: 4,
+      },
+      ...points.map((p, i) => ({
+        type: 'radar',
+        symbol: 'circle',
+        symbolSize: 6,
+        data: [{
+          value: points.map((_, j) => (j === i ? p.value : undefined)),
+          name: p.name,
+          itemStyle: { color: p.color || '#5048E5' }
+        }],
+        lineStyle: { width: 0 }
+      }))
+    ],
   };
 }
 

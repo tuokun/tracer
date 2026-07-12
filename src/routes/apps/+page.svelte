@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { getAppList, getAppIcon, getCategories, setAppCategory } from '$lib/api/commands';
+  import { getAppList, getAppIcon, getCategories, setAppCategory, updateAppDisplayName } from '$lib/api/commands';
   import { formatDuration, startOfDay, rangeForPeriod, shiftCursorForPeriod } from '$lib/utils/time';
   import type { Period as BasePeriod } from '$lib/utils/time';
   import { appDisplayName } from '$lib/utils/format';
@@ -25,6 +25,24 @@
     appId: number;
     appName: string;
   }>({ show: false, x: 0, y: 0, appId: 0, appName: '' });
+
+  // 二级子菜单（指派分类）是否展开
+  let showSubmenu = $state(false);
+
+  // 重命名模态框状态
+  let renameModal = $state<{
+    show: boolean;
+    appId: number;
+    processName: string;
+    oldName: string;
+    newName: string;
+  }>({
+    show: false,
+    appId: 0,
+    processName: '',
+    oldName: '',
+    newName: '',
+  });
 
   onMount(async () => {
     cats = await getCategories();
@@ -104,6 +122,7 @@
   // 关闭右键菜单
   function closeContextMenu() {
     contextMenu.show = false;
+    showSubmenu = false;
   }
 
   // 指派分类
@@ -111,6 +130,33 @@
     if (contextMenu.appId === 0) return;
     await setAppCategory(contextMenu.appId, categoryId);
     contextMenu.show = false;
+    await loadApps();
+  }
+
+  // 重命名应用：打开自定义模态框
+  function renameApp() {
+    if (contextMenu.appId === 0) return;
+    const targetApp = apps.find(a => a.id === contextMenu.appId);
+    if (!targetApp) return;
+    const oldName = appDisplayName(targetApp.display_name, targetApp.process_name);
+    renameModal = {
+      show: true,
+      appId: contextMenu.appId,
+      processName: targetApp.process_name,
+      oldName,
+      newName: targetApp.display_name || '',
+    };
+    contextMenu.show = false;
+  }
+
+  function closeRenameModal() {
+    renameModal.show = false;
+  }
+
+  async function confirmRename() {
+    const trimmed = renameModal.newName.trim();
+    await updateAppDisplayName(renameModal.appId, trimmed === "" ? null : trimmed);
+    renameModal.show = false;
     await loadApps();
   }
 </script>
@@ -229,8 +275,8 @@
       <div class="menu-header">{contextMenu.appName}</div>
       <div class="menu-divider"></div>
       
-      <!-- 选项一：指派分类（含有二级子菜单） -->
-      <div class="menu-item has-submenu">
+      <!-- 选项一：指派分类（点击展开二级子菜单） -->
+      <button class="menu-item has-submenu" class:submenu-open={showSubmenu} onclick={(e) => { e.stopPropagation(); showSubmenu = !showSubmenu; }}>
         <div class="menu-item-content">
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" class="menu-icon">
             <path stroke-linecap="round" stroke-linejoin="round" d="M7 7h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
@@ -243,22 +289,34 @@
         </svg>
 
         <!-- 二级子菜单：分类选择面板 -->
-        <div class="submenu context-menu">
-          <button class="menu-item clear-btn" onclick={() => assignCategory(0)}>
-            <span class="menu-dot clear-dot"></span>
-            <span class="menu-item-text">清除分类 (未分类)</span>
-          </button>
-          <div class="menu-divider"></div>
-          <div class="menu-scroll-area">
-            {#each cats as cat}
-              <button class="menu-item" onclick={() => assignCategory(cat.id)}>
-                <span class="menu-dot" style="background: {cat.color ?? '#5048E5'}"></span>
-                <span class="menu-item-text">{cat.name}</span>
-              </button>
-            {/each}
+        {#if showSubmenu}
+          <div class="submenu context-menu" onclick={(e) => e.stopPropagation()}>
+            <button class="menu-item clear-btn" onclick={() => assignCategory(0)}>
+              <span class="menu-dot clear-dot"></span>
+              <span class="menu-item-text">清除分类 (未分类)</span>
+            </button>
+            <div class="menu-divider"></div>
+            <div class="menu-scroll-area">
+              {#each cats as cat}
+                <button class="menu-item" onclick={() => assignCategory(cat.id)}>
+                  <span class="menu-dot" style="background: {cat.color ?? '#5048E5'}"></span>
+                  <span class="menu-item-text">{cat.name}</span>
+                </button>
+              {/each}
+            </div>
           </div>
+        {/if}
+      </button>
+      
+      <!-- 选项：重命名应用 -->
+      <button class="menu-item" onclick={renameApp}>
+        <div class="menu-item-content">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" class="menu-icon">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+          </svg>
+          <span class="menu-item-text">重命名应用</span>
         </div>
-      </div>
+      </button>
 
       <!-- 选项二：打开文件位置（预留） -->
       <button class="menu-item disabled-menu-item" type="button">
@@ -279,6 +337,26 @@
           <span class="menu-item-text">排除此应用 (不追踪)</span>
         </div>
       </button>
+    </div>
+  {/if}
+
+  <!-- 自定义重命名模态弹窗 -->
+  {#if renameModal.show}
+    <div class="modal-backdrop" onclick={closeRenameModal}>
+      <div class="modal-card" onclick={(e) => e.stopPropagation()}>
+        <div class="modal-header">
+          <h3 class="modal-title">重命名应用</h3>
+          <button class="modal-close" onclick={closeRenameModal}>&times;</button>
+        </div>
+        <div class="modal-body">
+          <p class="modal-desc">为进程 <code>{renameModal.processName}</code> 设置友好的显示名称。留空将恢复系统默认名称。</p>
+          <input class="modal-input" type="text" bind:value={renameModal.newName} placeholder="请输入新的显示名称" autofocus />
+        </div>
+        <div class="modal-footer">
+          <button class="modal-btn cancel-btn" onclick={closeRenameModal}>取消</button>
+          <button class="modal-btn confirm-btn" onclick={confirmRename}>确认</button>
+        </div>
+      </div>
     </div>
   {/if}
 </div>
@@ -688,22 +766,17 @@
   }
 
   .submenu {
-    display: none;
-    opacity: 0;
-    pointer-events: none;
     position: absolute;
     left: 100%;
     top: -5px;
     margin-left: 2px;
-    transform: translateX(4px);
-    transition: opacity 0.2s, transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  }
-
-  .has-submenu:hover .submenu {
-    display: block;
     opacity: 1;
     pointer-events: auto;
-    transform: translateX(0);
+  }
+
+  .submenu-open .submenu-arrow {
+    color: #000000;
+    transform: rotate(90deg);
   }
 
   /* 禁用（预留）的菜单项样式 */
@@ -720,5 +793,137 @@
   .disabled-menu-item:hover .menu-icon {
     color: theme('colors.text.secondary');
     transform: none;
+  }
+
+  /* 自定义模态弹窗样式 */
+  .modal-backdrop {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(26, 26, 50, 0.4);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  }
+
+  .modal-card {
+    background: #FFFFFF;
+    border: 1px solid theme('colors.border');
+    border-radius: 12px;
+    box-shadow: 0 12px 32px rgba(80, 72, 229, 0.15);
+    width: 320px;
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    animation: modal-enter 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  @keyframes modal-enter {
+    from { transform: scale(0.95); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+  }
+
+  .modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .modal-title {
+    font-family: 'Segoe UI Variable Display', 'Segoe UI', sans-serif;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: theme('colors.text.primary');
+    margin: 0;
+  }
+
+  .modal-close {
+    background: none;
+    border: none;
+    font-size: 1rem;
+    color: theme('colors.text.tertiary');
+    cursor: pointer;
+    line-height: 1;
+    padding: 0;
+  }
+
+  .modal-close:hover {
+    color: theme('colors.text.primary');
+  }
+
+  .modal-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+  }
+
+  .modal-desc {
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 0.55rem;
+    color: theme('colors.text.secondary');
+    margin: 0;
+    line-height: 1.4;
+  }
+
+  .modal-desc code {
+    font-family: 'JetBrains Mono', monospace;
+    background: #F0ECF8;
+    color: theme('colors.primary.DEFAULT');
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 0.5rem;
+  }
+
+  .modal-input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.375rem 0.5rem;
+    font-size: 0.6rem;
+    font-family: 'Segoe UI', sans-serif;
+    color: theme('colors.text.primary');
+    border: 1px solid theme('colors.border');
+    border-radius: 4px;
+    outline: none;
+  }
+
+  .modal-input:focus {
+    border-color: theme('colors.primary.DEFAULT');
+  }
+
+  .modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+  }
+
+  .modal-btn {
+    padding: 0.375rem 0.75rem;
+    border-radius: 4px;
+    font-size: 0.55rem;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: 'Segoe UI', sans-serif;
+  }
+
+  .modal-btn.cancel-btn {
+    border: 1px solid theme('colors.border');
+    background: #FFFFFF;
+    color: theme('colors.text.secondary');
+  }
+
+  .modal-btn.confirm-btn {
+    border: none;
+    background: theme('colors.primary.DEFAULT');
+    color: #FFFFFF;
+  }
+
+  .modal-btn:hover {
+    opacity: 0.9;
   }
 </style>

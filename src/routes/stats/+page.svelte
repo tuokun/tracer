@@ -378,14 +378,14 @@
   .pie-legend-item { display: flex; align-items: center; gap: 0.25rem; }
 
   .pie-legend-dot {
-    width: 6px;
-    height: 6px;
+    width: 8px;
+    height: 8px;
     border-radius: 50%;
   }
 
   .pie-legend-name {
     font-family: 'Segoe UI', sans-serif;
-    font-size: 0.4rem;
+    font-size: 0.65rem;
     color: theme('colors.text.secondary');
   }
 </style>

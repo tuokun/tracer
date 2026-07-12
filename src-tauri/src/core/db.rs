@@ -10,7 +10,14 @@ use tracing::info;
 
 /// 所有未执行迁移（按版本升序）。
 /// `schema_version` 表由 `open()` 引导创建，不在此列（否则循环依赖）。
-const MIGRATIONS: &[(u32, &str)] = &[(1, MIGRATION_V1)];
+const MIGRATIONS: &[(u32, &str)] = &[
+    (1, MIGRATION_V1),
+    (2, MIGRATION_V2),
+];
+
+const MIGRATION_V2: &str = r#"
+ALTER TABLE apps ADD COLUMN is_custom_name INTEGER DEFAULT 0;
+"#;
 
 const MIGRATION_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS apps (
@@ -115,7 +122,7 @@ mod tests {
     fn open_creates_full_schema() {
         let conn = open(Path::new(":memory:")).unwrap();
         // apps / hours_log / daily_log / categories / config / schema_version = 6
-        assert_eq!(version(&conn).unwrap(), 1);
+        assert_eq!(version(&conn).unwrap(), 2);
         assert_eq!(table_count(&conn).unwrap(), 6);
         // 关键表与索引存在
         let has: bool = conn
@@ -129,6 +136,6 @@ mod tests {
         // 已是 v1 的库再跑 migrate 不应报错、版本不变。
         let conn = open(Path::new(":memory:")).unwrap();
         migrate(&conn).unwrap();
-        assert_eq!(version(&conn).unwrap(), 1);
+        assert_eq!(version(&conn).unwrap(), 2);
     }
 }

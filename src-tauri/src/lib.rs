@@ -228,6 +228,16 @@ fn get_config_value(state: tauri::State<DbState>, key: String) -> Result<Option<
     Ok(val)
 }
 
+#[tauri::command]
+fn update_app_display_name(
+    state: tauri::State<DbState>,
+    app_id: i64,
+    display_name: Option<String>,
+) -> Result<(), String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::update_app_display_name(&conn, app_id, display_name.as_deref()).map_err(|e| e.to_string())
+}
+
 /// 用户是否主动请求退出（区别于关窗触发的 ExitRequested）。
 static SHOULD_QUIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -239,7 +249,8 @@ fn show_main_window(app: &AppHandle) {
     } else {
         let _ = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
             .title("Tracer")
-            .inner_size(960.0, 540.0)
+            .inner_size(800.0, 600.0)
+            .decorations(false)
             .build();
     }
 }
@@ -272,6 +283,7 @@ pub fn run() {
             set_config_value,
             get_config_value,
             get_app_icon,
+            update_app_display_name,
         ])
         .setup(|app| {
             let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<core::event::Event>();

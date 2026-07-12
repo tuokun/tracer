@@ -91,3 +91,7 @@ export async function setAppCategory(appId: number, categoryId: number): Promise
 export async function getConfigValue(key: string): Promise<string | null> {
   return invoke('get_config_value', { key });
 }
+
+export async function updateAppDisplayName(appId: number, displayName: string | null): Promise<void> {
+  return invoke('update_app_display_name', { appId, displayName });
+}

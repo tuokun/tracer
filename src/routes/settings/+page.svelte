@@ -10,16 +10,32 @@
   let windowH = $state('540');
   let savingWin = $state(false);
 
+  // 主题管理
+  let currentTheme = $state('system');
+  const themes = [
+    { id: 'system', name: '跟随系统', primary: '#5048E5', bg: 'linear-gradient(135deg, #F0F0EC 50%, #0F172A 50%)' },
+    { id: 'light', name: '极简浅色', primary: '#5048E5', bg: '#F0F0EC' },
+    { id: 'pure', name: '雅致纯白', primary: '#5048E5', bg: '#FFFFFF', border: '#E0DCF0' },
+    { id: 'dark', name: '护眼深色', primary: '#818CF8', bg: '#0F172A' },
+    { id: 'ocean', name: '深海幽蓝', primary: '#0EA5E9', bg: '#0B192C' },
+    { id: 'forest', name: '森林护眼', primary: '#10B981', bg: '#064E3B' }
+  ];
+
   onMount(async () => {
-    const f = await getConfigValue('flush_interval_secs');
+    const [f, enabled, ws, t] = await Promise.all([
+      getConfigValue('flush_interval_secs'),
+      isEnabled(),
+      getConfigValue('window_size'),
+      getConfigValue('theme'),
+    ]);
     if (f) flushInterval = String(Math.floor(parseInt(f) / 60));
-    autoStart = await isEnabled();
-    const ws = await getConfigValue('window_size');
+    autoStart = enabled;
     if (ws) {
       const [w, h] = ws.split(',');
       if (w) windowW = w.trim();
       if (h) windowH = h.trim();
     }
+    if (t) currentTheme = t;
   });
 
   async function saveFlush() {
@@ -46,12 +62,29 @@
     await setConfigValue('window_size', `${w},${h}`);
     savingWin = false;
   }
+
+  async function selectTheme(themeId: string) {
+    currentTheme = themeId;
+    await setConfigValue('theme', themeId);
+    window.dispatchEvent(new CustomEvent('theme-changed', { detail: themeId }));
+  }
+
+  async function openExternalLink(url: string) {
+    try {
+      const { openUrl } = await import('@tauri-apps/plugin-opener');
+      await openUrl(url);
+    } catch (e) {
+      console.error("打开链接失败:", e);
+      window.open(url, '_blank');
+    }
+  }
 </script>
 
 <div class="page">
   <h1 class="page-title">设置</h1>
   <p class="page-desc">应用配置和偏好</p>
 
+  <!-- 基础设置卡片 -->
   <div class="card">
     <div class="setting-row">
       <div class="setting-info">
@@ -106,6 +139,51 @@
       </div>
     </div>
   </div>
+
+  <!-- 主题管理卡片 -->
+  <div class="card mt-6">
+    <div class="section-title">主题管理</div>
+    <div class="theme-grid">
+      {#each themes as t}
+        <button 
+          class="theme-card" 
+          class:active={currentTheme === t.id}
+          onclick={() => selectTheme(t.id)}
+        >
+          <!-- 预设小圆盘色预览 -->
+          <div 
+            class="theme-preview" 
+            style="background: {t.bg}; border: {t.border ? `1px solid ${t.border}` : 'none'}"
+          >
+            <div class="theme-preview-dot" style="background: {t.primary}"></div>
+          </div>
+          <span class="theme-name">{t.name}</span>
+        </button>
+      {/each}
+    </div>
+  </div>
+
+  <!-- 关于 Tracer 卡片 -->
+  <div class="card mt-6">
+    <div class="about-section">
+      <div class="section-title">关于 Tracer</div>
+      <p class="about-desc">
+        Tracer 是一款轻量级、无感知的个人电脑活动效率分析工具。它可以自动记录您在各应用下的专注时间，并提供优雅的统计与热力图分析，帮助您理清每天的时间走向。
+      </p>
+      <div class="about-metadata">
+        <div class="metadata-row">
+          <span class="metadata-label">当前版本</span>
+          <span class="metadata-value">v0.1.0</span>
+        </div>
+        <div class="metadata-row">
+          <span class="metadata-label">项目源码</span>
+          <button class="link-btn" onclick={() => openExternalLink('https://github.com/cgfhsc/tracer')}>
+            GitHub 仓库
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <style>
@@ -115,24 +193,32 @@
     font-family: 'Segoe UI Variable Display', 'Segoe UI', sans-serif;
     font-weight: 700;
     font-size: 0.85rem;
-    color: theme('colors.text.primary');
+    color: var(--color-text-primary);
     margin: 0;
   }
 
   .page-desc {
     font-family: 'Segoe UI', sans-serif;
     font-size: 0.5rem;
-    color: theme('colors.text.secondary');
+    color: var(--color-text-secondary);
     margin-top: 0.15rem;
     margin-bottom: 0.85rem;
   }
 
+  .mt-6 {
+    margin-top: 0.85rem;
+  }
+
+  .section-title {
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 0.55rem;
+    font-weight: 700;
+    color: var(--color-text-primary);
+    margin-bottom: 0.6rem;
+  }
+
   .card {
     padding: 0.85rem 1.15rem;
-    background: #FFFFFF;
-    border: 1px solid rgba(80, 72, 229, 0.08);
-    border-radius: 12px;
-    box-shadow: 0 10px 30px rgba(80, 72, 229, 0.03), 0 1px 3px rgba(0, 0, 0, 0.01);
   }
 
   .setting-row {
@@ -152,13 +238,13 @@
     font-family: 'Segoe UI', sans-serif;
     font-size: 0.55rem;
     font-weight: 700;
-    color: #000000;
+    color: var(--color-text-primary);
   }
 
   .setting-desc {
     font-family: 'Segoe UI', sans-serif;
     font-size: 0.45rem;
-    color: theme('colors.text.secondary');
+    color: var(--color-text-secondary);
   }
 
   .setting-value {
@@ -171,47 +257,47 @@
     width: 65px;
     padding: 0.25rem 0.45rem;
     border-radius: 6px;
-    border: 1px solid #ECE9F5;
-    background: #FAF9FD;
+    border: 1px solid var(--color-border);
+    background: var(--color-bg);
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.52rem;
     font-weight: 600;
-    color: #000000;
+    color: var(--color-text-primary);
     text-align: center;
     outline: none;
     transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   .setting-input:focus {
-    border-color: color-mix(in srgb, theme('colors.primary.DEFAULT') 50%, transparent);
-    background: #FFFFFF;
-    box-shadow: 0 0 0 3px color-mix(in srgb, theme('colors.primary.DEFAULT') 8%, transparent);
+    border-color: var(--color-primary);
+    background: var(--color-surface);
+    box-shadow: 0 0 0 3px var(--color-primary-hover);
   }
 
   .setting-unit {
     font-family: 'Segoe UI', sans-serif;
     font-size: 0.5rem;
     font-weight: 600;
-    color: theme('colors.text.secondary');
+    color: var(--color-text-secondary);
   }
 
   .setting-save {
     padding: 0.25rem 0.65rem;
     border-radius: 6px;
     border: none;
-    background: linear-gradient(135deg, theme('colors.primary.DEFAULT') 0%, color-mix(in srgb, theme('colors.primary.DEFAULT') 82%, #000) 100%);
+    background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary) 100%);
     color: #FFFFFF;
     font-family: 'Segoe UI', sans-serif;
     font-size: 0.45rem;
     font-weight: 600;
     cursor: pointer;
-    box-shadow: 0 2px 6px color-mix(in srgb, theme('colors.primary.DEFAULT') 12%, transparent);
+    box-shadow: 0 2px 6px var(--color-primary-hover);
     transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   .setting-save:hover:not(:disabled) {
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px color-mix(in srgb, theme('colors.primary.DEFAULT') 20%, transparent);
+    opacity: 0.95;
   }
 
   .setting-save:active:not(:disabled) {
@@ -228,14 +314,95 @@
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.52rem;
     font-weight: 600;
-    color: theme('colors.text.secondary');
+    color: var(--color-text-secondary);
   }
 
   .setting-divider {
     height: 1px;
-    background: linear-gradient(to right, rgba(80, 72, 229, 0.08) 0%, rgba(80, 72, 229, 0.01) 100%);
+    background: linear-gradient(to right, var(--color-border) 0%, transparent 100%);
   }
 
+  /* 主题网格样式 */
+  .theme-grid {
+    @apply grid grid-cols-3 gap-3 mt-3;
+  }
+
+  .theme-card {
+    @apply flex flex-col items-center p-3 rounded-lg border border-border bg-surface cursor-pointer transition-all duration-200;
+  }
+
+  .theme-card:hover {
+    @apply border-primary scale-[1.02];
+  }
+
+  .theme-card.active {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 2px var(--color-primary-hover);
+  }
+
+  .theme-preview {
+    @apply w-12 h-8 rounded relative overflow-hidden mb-2 shadow-sm flex items-center justify-center;
+  }
+
+  .theme-preview-dot {
+    @apply w-3 h-3 rounded-full shadow-sm;
+  }
+
+  .theme-name {
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 0.48rem;
+    font-weight: 600;
+    color: var(--color-text-primary);
+  }
+
+  /* 关于页面样式 */
+  .about-section {
+    @apply flex flex-col;
+  }
+
+  .about-desc {
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 0.48rem;
+    line-height: 1.5;
+    color: var(--color-text-secondary);
+    margin-top: 0.1rem;
+    margin-bottom: 0.85rem;
+  }
+
+  .about-metadata {
+    @apply flex flex-col gap-2.5 border-t border-border pt-3.5;
+  }
+
+  .metadata-row {
+    @apply flex justify-between items-center;
+  }
+
+  .metadata-label {
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 0.48rem;
+    font-weight: 600;
+    color: var(--color-text-primary);
+  }
+
+  .metadata-value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.48rem;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+  }
+
+  .link-btn {
+    @apply bg-transparent border-none p-0 cursor-pointer font-bold transition-all;
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 0.48rem;
+    color: var(--color-primary);
+  }
+
+  .link-btn:hover {
+    @apply underline;
+  }
+
+  /* 开关滑动条样式 */
   .toggle {
     display: inline-flex;
     align-items: center;
@@ -249,7 +416,7 @@
   .toggle-slider {
     width: 34px;
     height: 18px;
-    background: #ECE9F5;
+    background: var(--color-border);
     border-radius: 9px;
     position: relative;
     transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
@@ -269,7 +436,7 @@
   }
   
   .toggle input:checked + .toggle-slider {
-    background: theme('colors.primary.DEFAULT');
+    background: var(--color-primary);
   }
   
   .toggle input:checked + .toggle-slider::after {
@@ -277,6 +444,6 @@
   }
 
   .toggle:hover .toggle-slider {
-    box-shadow: 0 0 0 2px color-mix(in srgb, theme('colors.primary.DEFAULT') 8%, transparent);
+    box-shadow: 0 0 0 2px var(--color-primary-hover);
   }
 </style>

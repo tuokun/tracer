@@ -18,9 +18,9 @@ pub fn upsert_app(
     executable_path: Option<&str>,
 ) -> rusqlite::Result<i64> {
     conn.execute(
-        "INSERT INTO apps(process_name, display_name, executable_path) VALUES (?1, ?2, ?3) \
+        "INSERT INTO apps(process_name, display_name, executable_path, is_custom_name) VALUES (?1, ?2, ?3, 0) \
          ON CONFLICT(process_name) DO UPDATE SET \
-            display_name = COALESCE(excluded.display_name, apps.display_name), \
+            display_name = CASE WHEN apps.is_custom_name = 1 THEN apps.display_name ELSE COALESCE(excluded.display_name, apps.display_name) END, \
             executable_path = COALESCE(excluded.executable_path, apps.executable_path)",
         params![process_name, display_name, executable_path],
     )?;
@@ -698,6 +698,27 @@ fn glob_match(pattern: &str, name: &str) -> bool {
     dp[np][nn]
 }
 
+/// 手动重命名应用。如果 `display_name` 是 `Some` 则标记 `is_custom_name` 为 1；
+/// 如果为 `None` (清空) 则清除自定义状态并把 `display_name` 设为 `NULL` 以重新恢复自动拉取。
+pub fn update_app_display_name(
+    conn: &Connection,
+    app_id: i64,
+    display_name: Option<&str>,
+) -> rusqlite::Result<()> {
+    if let Some(name) = display_name {
+        conn.execute(
+            "UPDATE apps SET display_name = ?1, is_custom_name = 1 WHERE id = ?2",
+            params![name, app_id],
+        )?;
+    } else {
+        conn.execute(
+            "UPDATE apps SET display_name = NULL, is_custom_name = 0 WHERE id = ?1",
+            params![app_id],
+        )?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -749,6 +770,50 @@ mod tests {
             .query_row("SELECT total_time FROM apps WHERE id=?1", params![app], |r| r.get(0))
             .unwrap();
         assert_eq!(total, 90 * 60);
+    }
+
+    #[test]
+    fn test_app_rename_protection() {
+        let conn = mem();
+        let app_id = upsert_app(&conn, "test_protect.exe", Some("Auto Name"), None).unwrap();
+        
+        let app = conn.query_row(
+            "SELECT display_name, is_custom_name FROM apps WHERE id = ?1",
+            params![app_id],
+            |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, i64>(1)?))
+        ).unwrap();
+        assert_eq!(app.0.as_deref(), Some("Auto Name"));
+        assert_eq!(app.1, 0);
+
+        update_app_display_name(&conn, app_id, Some("Manual Name")).unwrap();
+        
+        let app = conn.query_row(
+            "SELECT display_name, is_custom_name FROM apps WHERE id = ?1",
+            params![app_id],
+            |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, i64>(1)?))
+        ).unwrap();
+        assert_eq!(app.0.as_deref(), Some("Manual Name"));
+        assert_eq!(app.1, 1);
+
+        let new_app_id = upsert_app(&conn, "test_protect.exe", Some("New Auto Name"), None).unwrap();
+        assert_eq!(new_app_id, app_id);
+
+        let app = conn.query_row(
+            "SELECT display_name, is_custom_name FROM apps WHERE id = ?1",
+            params![app_id],
+            |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, i64>(1)?))
+        ).unwrap();
+        assert_eq!(app.0.as_deref(), Some("Manual Name"));
+        assert_eq!(app.1, 1);
+
+        update_app_display_name(&conn, app_id, None).unwrap();
+        let app = conn.query_row(
+            "SELECT display_name, is_custom_name FROM apps WHERE id = ?1",
+            params![app_id],
+            |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, i64>(1)?))
+        ).unwrap();
+        assert_eq!(app.0, None);
+        assert_eq!(app.1, 0);
     }
 
     /// 构造"今天某时某分"的 unix 时间戳（本地），便于跨小时/跨天测试。

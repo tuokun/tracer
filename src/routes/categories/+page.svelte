@@ -8,7 +8,8 @@
   let showForm = $state(false);
   let editingId = $state<number | null>(null);
   let formName = $state('');
-  let formColor = $state('#5048E5');
+  const DEFAULT_CAT_COLOR: string = CATEGORY_COLORS[0];
+  let formColor = $state<string>(DEFAULT_CAT_COLOR);
   let formRules = $state('');
 
   const colors = CATEGORY_COLORS;
@@ -19,9 +20,9 @@
 
   function startEdit(cat?: CategoryItem) {
     if (cat) {
-      editingId = cat.id; formName = cat.name; formColor = cat.color ?? '#5048E5'; formRules = cat.rules ?? '';
+      editingId = cat.id; formName = cat.name; formColor = cat.color ?? DEFAULT_CAT_COLOR; formRules = cat.rules ?? '';
     } else {
-      editingId = null; formName = ''; formColor = '#5048E5'; formRules = '';
+      editingId = null; formName = ''; formColor = DEFAULT_CAT_COLOR; formRules = '';
     }
     showForm = true;
   }
@@ -83,7 +84,7 @@
     <div class="cat-grid">
       {#each cats as cat}
         <!-- 注入 --cat-color 自定义变量 -->
-        <div class="cat-card" style="--cat-color: {cat.color ?? '#5048E5'}">
+        <div class="cat-card" style="--cat-color: {cat.color ?? DEFAULT_CAT_COLOR}">
           <div class="cat-color-bar"></div>
           <div class="cat-head">
             <!-- 矢量 SVG 标签图标，继承分类色彩 -->
@@ -97,6 +98,7 @@
               <div class="cat-rules-label">规则</div>
               <div class="cat-rules">{cat.rules}</div>
             {:else}
+              <div class="cat-rules-label" style="visibility: hidden;">占位</div>
               <span class="cat-manual-badge">手动指派</span>
             {/if}
           </div>
@@ -236,6 +238,9 @@
     overflow: hidden;
     transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.25s, border-color 0.25s;
     box-shadow: 0 4px 12px rgba(80,72,229,0.01), 0 1px 2px rgba(0,0,0,0.01);
+    display: flex;
+    flex-direction: column;
+    height: 100%;
   }
 
   .cat-card:hover {
@@ -259,23 +264,23 @@
   }
 
   .cat-tag-icon {
-    width: 14px;
-    height: 14px;
+    width: 16px;
+    height: 16px;
     flex-shrink: 0;
   }
 
   .cat-name {
     font-family: 'Segoe UI Variable Display', 'Segoe UI', sans-serif;
     font-weight: 600;
-    font-size: 0.65rem;
+    font-size: 0.8rem;
     color: theme('colors.text.primary');
   }
 
-  .cat-body { padding: 0.25rem 0.75rem 0.6rem 0.75rem; min-height: 40px; }
+  .cat-body { padding: 0.25rem 0.75rem 0.6rem 0.75rem; flex: 1; }
 
   .cat-rules-label {
     font-family: 'Segoe UI', sans-serif;
-    font-size: 0.5rem;
+    font-size: 0.62rem;
     color: theme('colors.text.tertiary');
     margin-bottom: 3px;
   }
@@ -284,7 +289,7 @@
   .cat-rules {
     display: inline-block;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 0.48rem;
+    font-size: 0.62rem;
     font-weight: 600;
     color: var(--cat-color, #5048E5);
     background: color-mix(in srgb, var(--cat-color, #5048E5) 7%, transparent);
@@ -297,7 +302,7 @@
   .cat-manual-badge {
     display: inline-block;
     font-family: 'Segoe UI', sans-serif;
-    font-size: 0.48rem;
+    font-size: 0.62rem;
     color: theme('colors.text.tertiary');
     background: #FAF9FD;
     padding: 0.08rem 0.3rem;
@@ -307,16 +312,19 @@
 
   .cat-actions {
     display: flex;
+    margin-top: auto;
     border-top: 1px solid color-mix(in srgb, var(--cat-color, #5048E5) 8%, transparent);
   }
 
   .cat-action-btn {
     flex: 1;
+    width: 50%;
+    box-sizing: border-box;
     padding: 0.375rem;
     border: none;
     background: none;
     font-family: 'Segoe UI', sans-serif;
-    font-size: 0.5rem;
+    font-size: 0.6rem;
     font-weight: 600;
     color: color-mix(in srgb, var(--cat-color, #5048E5) 70%, #666);
     cursor: pointer;
