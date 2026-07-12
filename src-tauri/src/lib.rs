@@ -178,9 +178,25 @@ fn apply_category_rules(state: tauri::State<DbState>) -> Result<usize, String> {
 }
 
 #[tauri::command]
-fn set_config_value(state: tauri::State<DbState>, key: String, value: String) -> Result<(), String> {
+fn set_config_value(
+    app: tauri::AppHandle,
+    state: tauri::State<DbState>,
+    key: String,
+    value: String,
+) -> Result<(), String> {
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    repo::set_config(&conn, &key, &value).map_err(|e| e.to_string())
+    repo::set_config(&conn, &key, &value).map_err(|e| e.to_string())?;
+
+    if key == "window_size" {
+        if let Some((a, b)) = value.split_once(',') {
+            let w: f64 = a.trim().parse().unwrap_or(960.0);
+            let h: f64 = b.trim().parse().unwrap_or(620.0);
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.set_size(LogicalSize::new(w, h));
+            }
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -238,6 +254,49 @@ fn update_app_display_name(
     repo::update_app_display_name(&conn, app_id, display_name.as_deref()).map_err(|e| e.to_string())
 }
 
+/// 窗口大小还原 & 监听。
+fn restore_and_monitor_window_size(app: &AppHandle, win: &tauri::WebviewWindow) {
+    if let Ok(data_dir) = app.path().app_data_dir() {
+        let db_path = data_dir.join("tracer.db");
+        // 优先级：1) config 表里的 window_size → 2) 960×620 默认
+        let (sw, sh): (f64, f64) = {
+            // 临时读取 config 表
+            let cfg = db::open(&db_path).ok().and_then(|c| {
+                c.query_row(
+                    "SELECT value FROM config WHERE key = 'window_size'",
+                    [],
+                    |r| r.get::<_, String>(0),
+                ).ok()
+            });
+            if let Some(val) = cfg {
+                if let Some((a, b)) = val.split_once(',') {
+                    let w = a.trim().parse().unwrap_or(960.0);
+                    let h = b.trim().parse().unwrap_or(620.0);
+                    if w > 0.0 && h > 0.0 { (w, h) } else { (960.0, 620.0) }
+                } else { (960.0, 620.0) }
+            } else { (960.0, 620.0) }
+        };
+        let _ = win.set_size(LogicalSize::new(sw, sh));
+
+        let app_clone = app.clone();
+        let w_clone = win.clone();
+        win.on_window_event(move |event| {
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
+                if let Ok(size) = w_clone.inner_size() {
+                    if let Ok(factor) = w_clone.scale_factor() {
+                        let logical = size.to_logical::<f64>(factor);
+                        if let Some(state) = app_clone.try_state::<DbState>() {
+                            if let Ok(conn) = state.conn.lock() {
+                                let _ = repo::set_config(&conn, "window_size", &format!("{},{}", logical.width, logical.height));
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+}
+
 /// 用户是否主动请求退出（区别于关窗触发的 ExitRequested）。
 static SHOULD_QUIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -247,11 +306,14 @@ fn show_main_window(app: &AppHandle) {
         let _ = w.show();
         let _ = w.set_focus();
     } else {
-        let _ = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
+        if let Ok(win) = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
             .title("Tracer")
-            .inner_size(800.0, 600.0)
+            .inner_size(960.0, 620.0)
             .decorations(false)
-            .build();
+            .build()
+        {
+            restore_and_monitor_window_size(app, &win);
+        }
     }
 }
 
@@ -296,38 +358,7 @@ pub fn run() {
 
             // 窗口大小还原 & 监听。
             if let Some(win) = app.get_webview_window("main") {
-                let size_file = data_dir.join("window_size");
-                // 优先级：1) config 表里的 window_size → 2) 文件 → 3) 960×540 默认
-                let (sw, sh): (f64, f64) = {
-                    // 临时读取 config 表
-                    let cfg = db::open(&db_path).ok().and_then(|c| {
-                        c.query_row(
-                            "SELECT value FROM config WHERE key = 'window_size'",
-                            [],
-                            |r| r.get::<_, String>(0),
-                        ).ok()
-                    });
-                    if let Some(val) = cfg {
-                        if let Some((a, b)) = val.split_once(',') {
-                            let w = a.trim().parse().unwrap_or(960.0);
-                            let h = b.trim().parse().unwrap_or(540.0);
-                            if w > 0.0 && h > 0.0 { (w, h) } else { (960.0, 540.0) }
-                        } else { (960.0, 540.0) }
-                    } else if let Ok(s) = std::fs::read_to_string(&size_file) {
-                        if let Some(pos) = s.find('\n') {
-                            let w = s[..pos].trim().parse().unwrap_or(0.0);
-                            let h = s[pos + 1..].trim().parse().unwrap_or(0.0);
-                            if w > 0.0 && h > 0.0 { (w, h) } else { (960.0, 540.0) }
-                        } else { (960.0, 540.0) }
-                    } else { (960.0, 540.0) }
-                };
-                let _ = win.set_size(LogicalSize::new(sw, sh));
-                let sp = size_file.clone();
-                win.on_window_event(move |event| {
-                    if let tauri::WindowEvent::Resized(size) = event {
-                        let _ = std::fs::write(&sp, format!("{}\n{}", size.width, size.height));
-                    }
-                });
+                restore_and_monitor_window_size(app.handle(), &win);
             }
 
             // 图标缓存目录。
@@ -361,6 +392,7 @@ pub fn run() {
                 .icon(app.default_window_icon().unwrap().clone())
                 .tooltip("Tracer")
                 .menu(&menu)
+                .menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "show" => show_main_window(app),
                     "quit" => {

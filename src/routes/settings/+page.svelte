@@ -7,7 +7,7 @@
   let autoStart = $state(false);
   let saving = $state(false);
   let windowW = $state('960');
-  let windowH = $state('540');
+  let windowH = $state('620');
   let savingWin = $state(false);
 
   // 主题管理
@@ -56,7 +56,7 @@
   async function saveWindowSize() {
     savingWin = true;
     const w = Math.max(400, parseInt(windowW) || 960);
-    const h = Math.max(300, parseInt(windowH) || 540);
+    const h = Math.max(300, parseInt(windowH) || 620);
     windowW = String(w);
     windowH = String(h);
     await setConfigValue('window_size', `${w},${h}`);
