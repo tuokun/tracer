@@ -42,6 +42,14 @@ pub fn add_duration(
     if duration_secs <= 0 {
         return Ok(());
     }
+    let is_ignored = conn.query_row(
+        "SELECT is_ignored FROM apps WHERE id = ?1",
+        params![app_id],
+        |r| r.get::<_, bool>(0),
+    )?;
+    if is_ignored {
+        return Ok(());
+    }
     let tx = conn.unchecked_transaction()?;
     for (hour_ts, date, secs) in split_hours(start_unix, duration_secs) {
         upsert_hours(&tx, app_id, hour_ts, secs)?;
@@ -167,14 +175,16 @@ pub fn get_today_summary(conn: &Connection) -> rusqlite::Result<TodaySummary> {
     let end = start + SECS_PER_DAY;
     let total: i64 = conn
         .query_row(
-            "SELECT COALESCE(SUM(time),0) FROM daily_log WHERE date >= ?1 AND date < ?2",
+            "SELECT COALESCE(SUM(d.time),0) FROM daily_log d JOIN apps a ON d.app_id = a.id \
+             WHERE d.date >= ?1 AND d.date < ?2 AND a.is_ignored = 0",
             params![start, end],
             |r| r.get(0),
         )
         .unwrap_or(0);
     let app_count: i64 = conn
         .query_row(
-            "SELECT COUNT(DISTINCT app_id) FROM daily_log WHERE date >= ?1 AND date < ?2",
+            "SELECT COUNT(DISTINCT d.app_id) FROM daily_log d JOIN apps a ON d.app_id = a.id \
+             WHERE d.date >= ?1 AND d.date < ?2 AND a.is_ignored = 0",
             params![start, end],
             |r| r.get(0),
         )
@@ -183,7 +193,7 @@ pub fn get_today_summary(conn: &Connection) -> rusqlite::Result<TodaySummary> {
         .query_row(
             "SELECT COALESCE(a.display_name, a.process_name) FROM daily_log d \
              JOIN apps a ON d.app_id = a.id \
-             WHERE d.date >= ?1 AND d.date < ?2 \
+             WHERE d.date >= ?1 AND d.date < ?2 AND a.is_ignored = 0 \
              ORDER BY d.time DESC LIMIT 1",
             params![start, end],
             |r| r.get(0),
@@ -210,7 +220,8 @@ pub fn get_app_rank(
 ) -> rusqlite::Result<Vec<AppRankItem>> {
     let total: f64 = conn
         .query_row(
-            "SELECT COALESCE(SUM(time),0) FROM daily_log WHERE date >= ?1 AND date < ?2",
+            "SELECT COALESCE(SUM(d.time),0) FROM daily_log d JOIN apps a ON d.app_id = a.id \
+             WHERE d.date >= ?1 AND d.date < ?2 AND a.is_ignored = 0",
             params![start_ts, end_ts],
             |r| r.get(0),
         )
@@ -221,7 +232,7 @@ pub fn get_app_rank(
          FROM daily_log d \
          JOIN apps a ON d.app_id = a.id \
          LEFT JOIN categories c ON a.category_id = c.id \
-         WHERE d.date >= ?1 AND d.date < ?2 \
+         WHERE d.date >= ?1 AND d.date < ?2 AND a.is_ignored = 0 \
          GROUP BY a.id \
          ORDER BY SUM(d.time) DESC \
          LIMIT ?3",
@@ -247,8 +258,8 @@ pub fn get_hourly_heatmap(conn: &Connection, date_ts: i64) -> rusqlite::Result<V
     let end = date_ts + SECS_PER_DAY;
     let mut stmt = conn.prepare(
         "SELECT h.data_time, SUM(h.time) \
-         FROM hours_log h \
-         WHERE h.data_time >= ?1 AND h.data_time < ?2 \
+         FROM hours_log h JOIN apps a ON h.app_id = a.id \
+         WHERE h.data_time >= ?1 AND h.data_time < ?2 AND a.is_ignored = 0 \
          GROUP BY h.data_time",
     )?;
     let rows: Vec<(i64, i64)> = stmt
@@ -273,6 +284,7 @@ pub fn get_app_list(
     sort_by: Option<&str>,
     start_ts: Option<i64>,
     end_ts: Option<i64>,
+    include_ignored: bool,
 ) -> rusqlite::Result<Vec<AppItem>> {
     let mut sql = String::new();
     let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -287,29 +299,41 @@ pub fn get_app_list(
     };
 
     if is_range {
-        sql.push_str(
-            "SELECT a.id, a.process_name, a.display_name, a.executable_path, \
-                    a.icon_path, SUM(d.time) as range_time, c.name, c.color, \
-                    MAX(d.date) \
-             FROM daily_log d \
-             JOIN apps a ON d.app_id = a.id \
-             LEFT JOIN categories c ON a.category_id = c.id \
-             WHERE d.date >= ? AND d.date < ?"
-        );
+        if include_ignored {
+            sql.push_str(
+                "SELECT a.id, a.process_name, a.display_name, a.executable_path, \
+                        a.custom_icon_path, COALESCE(SUM(d.time), 0) as range_time, c.name, c.color, \
+                        MAX(d.date), a.is_ignored \
+                 FROM apps a \
+                 LEFT JOIN daily_log d ON d.app_id = a.id AND d.date >= ? AND d.date < ? \
+                 LEFT JOIN categories c ON a.category_id = c.id \
+                 WHERE 1=1"
+            );
+        } else {
+            sql.push_str(
+                "SELECT a.id, a.process_name, a.display_name, a.executable_path, \
+                        a.custom_icon_path, SUM(d.time) as range_time, c.name, c.color, \
+                        MAX(d.date), a.is_ignored \
+                 FROM daily_log d \
+                 JOIN apps a ON d.app_id = a.id \
+                 LEFT JOIN categories c ON a.category_id = c.id \
+                 WHERE d.date >= ? AND d.date < ?"
+            );
+        }
         params_vec.push(Box::new(start_ts.unwrap()));
         params_vec.push(Box::new(end_ts.unwrap()));
-        push_app_filters(&mut sql, &mut params_vec, search, category_id);
+        push_app_filters(&mut sql, &mut params_vec, search, category_id, include_ignored);
         sql.push_str(" GROUP BY a.id");
     } else {
         sql.push_str(
             "SELECT a.id, a.process_name, a.display_name, a.executable_path, \
-                    a.icon_path, a.total_time, c.name, c.color, \
-                    (SELECT MAX(date) FROM daily_log WHERE app_id = a.id) \
+                    a.custom_icon_path, a.total_time, c.name, c.color, \
+                    (SELECT MAX(date) FROM daily_log WHERE app_id = a.id), a.is_ignored \
              FROM apps a \
              LEFT JOIN categories c ON a.category_id = c.id \
              WHERE 1=1"
         );
-        push_app_filters(&mut sql, &mut params_vec, search, category_id);
+        push_app_filters(&mut sql, &mut params_vec, search, category_id, include_ignored);
     }
     sql.push_str(" ORDER BY ");
     sql.push_str(sort_field);
@@ -327,6 +351,7 @@ pub fn get_app_list(
             category_name: r.get(6)?,
             category_color: r.get(7)?,
             last_used_date: r.get(8)?,
+            is_ignored: r.get(9)?,
         })
     })?;
     rows.collect()
@@ -339,7 +364,11 @@ fn push_app_filters(
     params: &mut Vec<Box<dyn rusqlite::types::ToSql>>,
     search: Option<&str>,
     category_id: Option<i64>,
+    include_ignored: bool,
 ) {
+    if !include_ignored {
+        sql.push_str(" AND a.is_ignored = 0");
+    }
     if let Some(s) = search {
         if !s.is_empty() {
             sql.push_str(" AND (a.process_name LIKE ? OR a.display_name LIKE ?)");
@@ -481,14 +510,14 @@ pub fn get_stats_range(
             "SELECT a.id, COALESCE(a.display_name, a.process_name), h.data_time, SUM(h.time) \
              FROM hours_log h \
              JOIN apps a ON h.app_id = a.id \
-             WHERE h.data_time >= ?1 AND h.data_time < ?2 \
+             WHERE h.data_time >= ?1 AND h.data_time < ?2 AND a.is_ignored = 0 \
              GROUP BY a.id, h.data_time"
         }
         _ => {
             "SELECT a.id, COALESCE(a.display_name, a.process_name), d.date, SUM(d.time) \
              FROM daily_log d \
              JOIN apps a ON d.app_id = a.id \
-             WHERE d.date >= ?1 AND d.date < ?2 \
+             WHERE d.date >= ?1 AND d.date < ?2 AND a.is_ignored = 0 \
              GROUP BY a.id, d.date"
         }
     };
@@ -543,7 +572,7 @@ pub fn get_stats_radar(conn: &Connection, start_ts: i64, end_ts: i64) -> rusqlit
          FROM daily_log d \
          JOIN apps a ON d.app_id = a.id \
          LEFT JOIN categories c ON a.category_id = c.id \
-         WHERE d.date >= ?1 AND d.date < ?2 \
+         WHERE d.date >= ?1 AND d.date < ?2 AND a.is_ignored = 0 \
          GROUP BY COALESCE(c.name,'未分类') \
          ORDER BY 3 DESC",
     )?;
@@ -564,7 +593,7 @@ pub fn get_stats_pie(conn: &Connection, start_ts: i64, end_ts: i64) -> rusqlite:
          FROM daily_log d \
          JOIN apps a ON d.app_id = a.id \
          LEFT JOIN categories c ON a.category_id = c.id \
-         WHERE d.date >= ?1 AND d.date < ?2 \
+         WHERE d.date >= ?1 AND d.date < ?2 AND a.is_ignored = 0 \
          GROUP BY COALESCE(c.name,'未分类') \
          ORDER BY 3 DESC",
     )?;
@@ -582,7 +611,8 @@ pub fn get_stats_pie(conn: &Connection, start_ts: i64, end_ts: i64) -> rusqlite:
 pub fn get_stats_summary(conn: &Connection, start_ts: i64, end_ts: i64) -> rusqlite::Result<StatsSummary> {
     let total: i64 = conn
         .query_row(
-            "SELECT COALESCE(SUM(time),0) FROM daily_log WHERE date >= ?1 AND date < ?2",
+            "SELECT COALESCE(SUM(d.time),0) FROM daily_log d JOIN apps a ON d.app_id = a.id \
+             WHERE d.date >= ?1 AND d.date < ?2 AND a.is_ignored = 0",
             params![start_ts, end_ts],
             |r| r.get(0),
         )
@@ -594,7 +624,7 @@ pub fn get_stats_summary(conn: &Connection, start_ts: i64, end_ts: i64) -> rusql
             "SELECT c.name FROM daily_log d \
              JOIN apps a ON d.app_id = a.id \
              LEFT JOIN categories c ON a.category_id = c.id \
-             WHERE d.date >= ?1 AND d.date < ?2 \
+             WHERE d.date >= ?1 AND d.date < ?2 AND a.is_ignored = 0 \
              GROUP BY COALESCE(c.name,'未分类') \
              ORDER BY SUM(d.time) DESC LIMIT 1",
             params![start_ts, end_ts],
@@ -606,7 +636,7 @@ pub fn get_stats_summary(conn: &Connection, start_ts: i64, end_ts: i64) -> rusql
         .query_row(
             "SELECT COALESCE(a.display_name, a.process_name) FROM daily_log d \
              JOIN apps a ON d.app_id = a.id \
-             WHERE d.date >= ?1 AND d.date < ?2 \
+             WHERE d.date >= ?1 AND d.date < ?2 AND a.is_ignored = 0 \
              GROUP BY a.id ORDER BY SUM(d.time) DESC LIMIT 1",
             params![start_ts, end_ts],
             |r| r.get(0),
@@ -719,6 +749,45 @@ pub fn update_app_display_name(
     Ok(())
 }
 
+pub fn set_app_ignored(conn: &Connection, app_id: i64, ignored: bool) -> rusqlite::Result<()> {
+    conn.execute(
+        "UPDATE apps SET is_ignored = ?1 WHERE id = ?2",
+        params![ignored, app_id],
+    )?;
+    Ok(())
+}
+
+pub fn is_app_ignored(conn: &Connection, app_id: i64) -> rusqlite::Result<bool> {
+    conn.query_row(
+        "SELECT is_ignored FROM apps WHERE id = ?1",
+        params![app_id],
+        |r| r.get(0),
+    )
+}
+
+pub fn set_custom_icon_path(
+    conn: &Connection,
+    app_id: i64,
+    path: Option<&str>,
+) -> rusqlite::Result<()> {
+    conn.execute(
+        "UPDATE apps SET custom_icon_path = ?1 WHERE id = ?2",
+        params![path, app_id],
+    )?;
+    Ok(())
+}
+
+pub fn get_app_icon_info(
+    conn: &Connection,
+    process_name: &str,
+) -> rusqlite::Result<(i64, Option<String>)> {
+    conn.query_row(
+        "SELECT id, custom_icon_path FROM apps WHERE process_name = ?1",
+        params![process_name],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -770,6 +839,34 @@ mod tests {
             .query_row("SELECT total_time FROM apps WHERE id=?1", params![app], |r| r.get(0))
             .unwrap();
         assert_eq!(total, 90 * 60);
+    }
+
+    #[test]
+    fn ignored_app_does_not_accumulate_duration() {
+        let conn = mem();
+        let app = upsert_app(&conn, "ignored.exe", None, None).unwrap();
+        set_app_ignored(&conn, app, true).unwrap();
+        add_duration(&conn, app, now_at(10, 0), 60).unwrap();
+
+        let total: i64 = conn
+            .query_row("SELECT total_time FROM apps WHERE id=?1", params![app], |r| r.get(0))
+            .unwrap();
+        assert_eq!(total, 0);
+    }
+
+    #[test]
+    fn app_list_can_include_ignored_apps_without_range_data() {
+        let conn = mem();
+        let app = upsert_app(&conn, "hidden.exe", None, None).unwrap();
+        set_app_ignored(&conn, app, true).unwrap();
+        let start = now_at(0, 0);
+
+        let visible = get_app_list(&conn, None, None, None, Some(start), Some(start + 86400), false).unwrap();
+        assert!(visible.is_empty());
+        let all = get_app_list(&conn, None, None, None, Some(start), Some(start + 86400), true).unwrap();
+        assert_eq!(all.len(), 1);
+        assert!(all[0].is_ignored);
+        assert_eq!(all[0].total_seconds, 0);
     }
 
     #[test]

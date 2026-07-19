@@ -39,6 +39,7 @@ pub struct AppItem {
     pub category_name: Option<String>,
     pub category_color: Option<String>,
     pub last_used_date: Option<i64>,
+    pub is_ignored: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]

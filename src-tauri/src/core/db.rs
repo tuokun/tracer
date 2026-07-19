@@ -13,7 +13,13 @@ use tracing::info;
 const MIGRATIONS: &[(u32, &str)] = &[
     (1, MIGRATION_V1),
     (2, MIGRATION_V2),
+    (3, MIGRATION_V3),
 ];
+
+const MIGRATION_V3: &str = r#"
+ALTER TABLE apps ADD COLUMN is_ignored INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE apps ADD COLUMN custom_icon_path TEXT;
+"#;
 
 const MIGRATION_V2: &str = r#"
 ALTER TABLE apps ADD COLUMN is_custom_name INTEGER DEFAULT 0;
@@ -122,7 +128,7 @@ mod tests {
     fn open_creates_full_schema() {
         let conn = open(Path::new(":memory:")).unwrap();
         // apps / hours_log / daily_log / categories / config / schema_version = 6
-        assert_eq!(version(&conn).unwrap(), 2);
+        assert_eq!(version(&conn).unwrap(), 3);
         assert_eq!(table_count(&conn).unwrap(), 6);
         // 关键表与索引存在
         let has: bool = conn
@@ -136,6 +142,26 @@ mod tests {
         // 已是 v1 的库再跑 migrate 不应报错、版本不变。
         let conn = open(Path::new(":memory:")).unwrap();
         migrate(&conn).unwrap();
-        assert_eq!(version(&conn).unwrap(), 2);
+        assert_eq!(version(&conn).unwrap(), 3);
+    }
+
+    #[test]
+    fn migrates_v2_database_without_losing_apps() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(MIGRATION_V1).unwrap();
+        conn.execute_batch(MIGRATION_V2).unwrap();
+        conn.execute("CREATE TABLE schema_version (version INTEGER PRIMARY KEY)", []).unwrap();
+        conn.execute("INSERT INTO schema_version(version) VALUES (1), (2)", []).unwrap();
+        conn.execute("INSERT INTO apps(process_name, total_time) VALUES ('demo.exe', 42)", []).unwrap();
+
+        migrate(&conn).unwrap();
+
+        let row: (i64, i64, Option<String>) = conn.query_row(
+            "SELECT total_time, is_ignored, custom_icon_path FROM apps WHERE process_name='demo.exe'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        ).unwrap();
+        assert_eq!(version(&conn).unwrap(), 3);
+        assert_eq!(row, (42, 0, None));
     }
 }

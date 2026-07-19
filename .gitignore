@@ -32,8 +32,15 @@ Thumbs.db
 .agents/
 .claude/
 .gitnexus/
+.codex/
 AGENTS.md
 CLAUDE.md
 
 # 上游参考源码
 /Tai/
+
+# pnpm store
+.pnpm-store/
+
+# 本地文件
+/docs/

@@ -1,6 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { getAppList, getAppIcon, getCategories, setAppCategory, updateAppDisplayName } from '$lib/api/commands';
+  import {
+    getAppList, getAppIcon, getCategories, setAppCategory, updateAppDisplayName,
+    revealAppInFolder, setAppIgnored, setCustomAppIcon, resetCustomAppIcon
+  } from '$lib/api/commands';
   import { formatDuration, startOfDay, rangeForPeriod, shiftCursorForPeriod } from '$lib/utils/time';
   import type { Period as BasePeriod } from '$lib/utils/time';
   import { appDisplayName } from '$lib/utils/format';
@@ -11,6 +14,8 @@
   let search = $state('');
   let sort = $state('time');
   let iconCache = $state(new Map<string, string>());
+  let includeIgnored = $state(false);
+  let iconFileInput: HTMLInputElement;
 
   // 时间段与日期游标状态（'all' = 历史累计，不参与范围计算）
   type AppPeriod = BasePeriod | 'all';
@@ -24,7 +29,11 @@
     y: number;
     appId: number;
     appName: string;
-  }>({ show: false, x: 0, y: 0, appId: 0, appName: '' });
+    processName: string;
+    executablePath: string | null;
+    hasCustomIcon: boolean;
+    isIgnored: boolean;
+  }>({ show: false, x: 0, y: 0, appId: 0, appName: '', processName: '', executablePath: null, hasCustomIcon: false, isIgnored: false });
 
   // 二级子菜单（指派分类）是否展开
   let showSubmenu = $state(false);
@@ -69,7 +78,7 @@
 
   async function loadApps() {
     const range = period === 'all' ? undefined : rangeForPeriod(period, cursorTs);
-    apps = await getAppList(search || undefined, undefined, sort, range?.start, range?.end);
+    apps = await getAppList(search || undefined, undefined, sort, range?.start, range?.end, includeIgnored);
     await loadIcons();
   }
 
@@ -107,15 +116,19 @@
   }
 
   // 展开右键菜单
-  function showContextMenu(e: MouseEvent, appId: number, appName: string) {
+  function showContextMenu(e: MouseEvent, app: AppItem) {
     e.preventDefault();
     e.stopPropagation();
     contextMenu = {
       show: true,
       x: e.clientX,
       y: e.clientY,
-      appId,
-      appName
+      appId: app.id,
+      appName: appDisplayName(app.display_name, app.process_name),
+      processName: app.process_name,
+      executablePath: app.executable_path,
+      hasCustomIcon: Boolean(app.icon_path),
+      isIgnored: app.is_ignored,
     };
   }
 
@@ -157,6 +170,54 @@
     const trimmed = renameModal.newName.trim();
     await updateAppDisplayName(renameModal.appId, trimmed === "" ? null : trimmed);
     renameModal.show = false;
+    await loadApps();
+  }
+
+  async function openFileLocation() {
+    if (!contextMenu.executablePath) return;
+    try {
+      await revealAppInFolder(contextMenu.executablePath);
+      closeContextMenu();
+    } catch (error) {
+      alert(String(error));
+    }
+  }
+
+  async function toggleIgnored() {
+    const ignored = !contextMenu.isIgnored;
+    if (ignored && !confirm(`忽略“${contextMenu.appName}”后将停止记录新的使用时长，已有历史数据会保留。确定继续吗？`)) return;
+    await setAppIgnored(contextMenu.appId, ignored);
+    closeContextMenu();
+    await loadApps();
+  }
+
+  function chooseCustomIcon() {
+    closeContextMenu();
+    iconFileInput.click();
+  }
+
+  async function onIconFileSelected(e: Event) {
+    const input = e.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    try {
+      const data = Array.from(new Uint8Array(await file.arrayBuffer()));
+      const icon = await setCustomAppIcon(contextMenu.appId, contextMenu.processName, data);
+      iconCache.set(contextMenu.processName, icon);
+      iconCache = new Map(iconCache);
+      await loadApps();
+    } catch (error) {
+      alert(String(error));
+    } finally {
+      input.value = '';
+    }
+  }
+
+  async function restoreDefaultIcon() {
+    await resetCustomAppIcon(contextMenu.appId, contextMenu.processName);
+    iconCache.delete(contextMenu.processName);
+    iconCache = new Map(iconCache);
+    closeContextMenu();
     await loadApps();
   }
 </script>
@@ -208,6 +269,7 @@
   </div>
 
   <div class="toolbar">
+    <input bind:this={iconFileInput} class="icon-file-input" type="file" accept=".png,.jpg,.jpeg,.ico,image/png,image/jpeg,image/x-icon" onchange={onIconFileSelected} />
     <!-- 美化搜索框：包含放大镜 SVG -->
     <div class="search-wrapper">
       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" class="search-icon">
@@ -226,6 +288,10 @@
         <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
       </svg>
     </div>
+    <label class="ignored-filter">
+      <input type="checkbox" bind:checked={includeIgnored} onchange={loadApps} />
+      <span>显示已忽略</span>
+    </label>
   </div>
 
   <div class="card">
@@ -243,7 +309,7 @@
     {:else}
       {#each apps as app}
         <!-- 绑定鼠标右键事件，打开 ContextMenu -->
-        <div class="table-row" oncontextmenu={(e) => showContextMenu(e, app.id, appDisplayName(app.display_name, app.process_name))}>
+        <div class="table-row" class:ignored-row={app.is_ignored} oncontextmenu={(e) => showContextMenu(e, app)}>
           <span class="col-icon">
             {#if iconCache.get(app.process_name)}
               <img src={iconCache.get(app.process_name)} alt="" class="app-icon" />
@@ -318,8 +384,7 @@
         </div>
       </button>
 
-      <!-- 选项二：打开文件位置（预留） -->
-      <button class="menu-item disabled-menu-item" type="button">
+      <button class="menu-item" class:disabled-menu-item={!contextMenu.executablePath} disabled={!contextMenu.executablePath} type="button" onclick={openFileLocation}>
         <div class="menu-item-content">
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" class="menu-icon">
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -328,13 +393,29 @@
         </div>
       </button>
 
-      <!-- 选项三：排除此应用（预留） -->
-      <button class="menu-item disabled-menu-item" type="button">
+      <button class="menu-item" type="button" onclick={chooseCustomIcon}>
+        <div class="menu-item-content">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" class="menu-icon">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4-4a3 3 0 014 0l4 4m-2-2l1-1a3 3 0 014 0l1 1M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+          </svg>
+          <span class="menu-item-text">更换图标</span>
+        </div>
+      </button>
+
+      {#if contextMenu.hasCustomIcon}
+        <button class="menu-item" type="button" onclick={restoreDefaultIcon}>
+          <div class="menu-item-content">
+            <span class="menu-item-text">恢复默认图标</span>
+          </div>
+        </button>
+      {/if}
+
+      <button class="menu-item" type="button" onclick={toggleIgnored}>
         <div class="menu-item-content">
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" class="menu-icon">
             <path stroke-linecap="round" stroke-linejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
           </svg>
-          <span class="menu-item-text">排除此应用 (不追踪)</span>
+          <span class="menu-item-text">{contextMenu.isIgnored ? '恢复追踪' : '忽略该应用'}</span>
         </div>
       </button>
     </div>
@@ -363,6 +444,8 @@
 
 <style>
   .page { max-width: 1000px; }
+
+  .icon-file-input { display: none; }
 
   .header-strip {
     display: flex;
@@ -603,6 +686,21 @@
   }
 
   .table-row:last-child { border-bottom: none; }
+
+  .ignored-row { opacity: 0.55; }
+
+  .ignored-filter {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 0.45rem;
+    color: theme('colors.text.secondary');
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .ignored-filter input { accent-color: theme('colors.primary.DEFAULT'); }
 
   .col-icon { width: 28px; }
   .col-icon img, .app-icon-placeholder { width: 20px; height: 20px; border-radius: 3px; vertical-align: middle; }

@@ -12,6 +12,7 @@
 
     currentTheme = getStoredTheme();
     applyTheme(currentTheme);
+    notifyReadyAfterPaint();
 
     getConfigValue('theme')
       .then((theme) => {
@@ -22,11 +23,6 @@
       })
       .catch((e) => {
         console.error("加载主题配置失败:", e);
-      })
-      .finally(() => {
-        if (!cancelled) {
-          notifyReadyAfterPaint();
-        }
       });
 
     // 监听全局主题变更事件
@@ -71,9 +67,7 @@
 
   function notifyReadyAfterPaint() {
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        notifyFrontendReady().catch(console.error);
-      });
+      notifyFrontendReady().catch(console.error);
     });
   }
 

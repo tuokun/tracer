@@ -1,6 +1,9 @@
 mod core;
 
 use std::collections::HashMap;
+use std::io::Cursor;
+use std::path::Path;
+use std::process::Command;
 use std::sync::{Arc, Mutex};
 
 use rusqlite::Connection;
@@ -92,6 +95,7 @@ fn get_app_list(
     sort: Option<String>,
     start_ts: Option<i64>,
     end_ts: Option<i64>,
+    include_ignored: Option<bool>,
 ) -> Result<Vec<AppItem>, String> {
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     repo::get_app_list(
@@ -101,6 +105,7 @@ fn get_app_list(
         sort.as_deref(),
         start_ts,
         end_ts,
+        include_ignored.unwrap_or(false),
     )
     .map_err(|e| e.to_string())
 }
@@ -201,6 +206,7 @@ fn set_config_value(
 
 #[tauri::command]
 fn get_app_icon(
+    db: tauri::State<DbState>,
     state: tauri::State<IconDir>,
     exe_path: String,
     process_name: String,
@@ -213,10 +219,19 @@ fn get_app_icon(
             }
         }
     }
-    // 未命中 → 提取 + 编码
+    // 未命中 → 优先读取用户图标，否则自动提取。
     use std::io::Read;
-    let path = core::iconer::extract(&exe_path, &state.path, &process_name)
-        .ok_or("无关联图标")?;
+    let custom_path = {
+        let conn = db.conn.lock().map_err(|e| e.to_string())?;
+        repo::get_app_icon_info(&conn, &process_name)
+            .map_err(|e| e.to_string())?
+            .1
+    };
+    let path = match custom_path {
+        Some(path) if Path::new(&path).is_file() => path,
+        _ => core::iconer::extract(&exe_path, &state.path, &process_name)
+            .ok_or("无关联图标")?,
+    };
     let mut f = std::fs::File::open(&path).map_err(|e| e.to_string())?;
     let mut buf = Vec::new();
     f.read_to_end(&mut buf).map_err(|e| e.to_string())?;
@@ -228,6 +243,121 @@ fn get_app_icon(
         cache.insert(process_name, data_uri.clone());
     }
     Ok(data_uri)
+}
+
+#[tauri::command]
+fn reveal_app_in_folder(executable_path: String) -> Result<(), String> {
+    let path = Path::new(&executable_path);
+    if !path.is_file() {
+        return Err("应用文件不存在".to_string());
+    }
+    Command::new("explorer.exe")
+        .arg(format!("/select,{}", path.display()))
+        .spawn()
+        .map_err(|e| format!("无法打开文件位置: {e}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn set_app_ignored(
+    state: tauri::State<DbState>,
+    session: tauri::State<SessionState>,
+    app_id: i64,
+    ignored: bool,
+) -> Result<(), String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::set_app_ignored(&conn, app_id, ignored).map_err(|e| e.to_string())?;
+    if ignored {
+        let process_name: String = conn
+            .query_row(
+                "SELECT process_name FROM apps WHERE id = ?1",
+                rusqlite::params![app_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if let Ok(mut current) = session.inner.lock() {
+            if current.as_ref().is_some_and(|s| s.process_name == process_name) {
+                *current = None;
+            }
+        }
+        if let Ok(mut last) = session.last_active.lock() {
+            if last.as_ref().is_some_and(|s| s.process_name == process_name) {
+                *last = None;
+            }
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn set_custom_app_icon(
+    db: tauri::State<DbState>,
+    icons: tauri::State<IconDir>,
+    app_id: i64,
+    process_name: String,
+    data: Vec<u8>,
+) -> Result<String, String> {
+    if data.is_empty() || data.len() > 10 * 1024 * 1024 {
+        return Err("图标文件必须小于 10 MB".to_string());
+    }
+    {
+        let conn = db.conn.lock().map_err(|e| e.to_string())?;
+        let (stored_id, _) = repo::get_app_icon_info(&conn, &process_name).map_err(|e| e.to_string())?;
+        if stored_id != app_id {
+            return Err("应用标识不匹配".to_string());
+        }
+    }
+    let image = image::load_from_memory(&data).map_err(|_| "不支持或损坏的图片文件".to_string())?;
+    let image = image.thumbnail(128, 128);
+    let mut png = Cursor::new(Vec::new());
+    image
+        .write_to(&mut png, image::ImageFormat::Png)
+        .map_err(|e| format!("图标转换失败: {e}"))?;
+
+    let path = icons.path.join(format!("custom-{app_id}.png"));
+    std::fs::write(&path, png.get_ref()).map_err(|e| format!("图标保存失败: {e}"))?;
+    {
+        let conn = db.conn.lock().map_err(|e| e.to_string())?;
+        repo::set_custom_icon_path(&conn, app_id, Some(&path.to_string_lossy()))
+            .map_err(|e| e.to_string())?;
+    }
+    use base64::Engine;
+    let data_uri = format!(
+        "data:image/png;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(png.get_ref())
+    );
+    if let Ok(mut cache) = icons.cache.lock() {
+        cache.insert(process_name, data_uri.clone());
+    }
+    Ok(data_uri)
+}
+
+#[tauri::command]
+fn reset_custom_app_icon(
+    db: tauri::State<DbState>,
+    icons: tauri::State<IconDir>,
+    app_id: i64,
+    process_name: String,
+) -> Result<(), String> {
+    let old_path = {
+        let conn = db.conn.lock().map_err(|e| e.to_string())?;
+        let (stored_id, path) = repo::get_app_icon_info(&conn, &process_name).map_err(|e| e.to_string())?;
+        if stored_id != app_id {
+            return Err("应用标识不匹配".to_string());
+        }
+        repo::set_custom_icon_path(&conn, app_id, None).map_err(|e| e.to_string())?;
+        path
+    };
+    if let Some(path) = old_path {
+        let expected = icons.path.join(format!("custom-{app_id}.png"));
+        if Path::new(&path) == expected && expected.is_file() {
+            std::fs::remove_file(expected).map_err(|e| format!("旧图标删除失败: {e}"))?;
+        }
+    }
+    if let Ok(mut cache) = icons.cache.lock() {
+        cache.remove(&process_name);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -462,6 +592,10 @@ pub fn run() {
             set_config_value,
             get_config_value,
             get_app_icon,
+            reveal_app_in_folder,
+            set_app_ignored,
+            set_custom_app_icon,
+            reset_custom_app_icon,
             update_app_display_name,
             notify_frontend_ready,
         ])

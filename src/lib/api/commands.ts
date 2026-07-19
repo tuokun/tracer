@@ -29,7 +29,8 @@ export async function getAppList(
   categoryId?: number,
   sort?: string,
   startTs?: number,
-  endTs?: number
+  endTs?: number,
+  includeIgnored?: boolean
 ): Promise<AppItem[]> {
   return invoke('get_app_list', {
     search,
@@ -37,6 +38,7 @@ export async function getAppList(
     sort,
     startTs,
     endTs,
+    includeIgnored,
   });
 }
 
@@ -94,6 +96,24 @@ export async function getConfigValue(key: string): Promise<string | null> {
 
 export async function updateAppDisplayName(appId: number, displayName: string | null): Promise<void> {
   return invoke('update_app_display_name', { appId, displayName });
+}
+
+export async function revealAppInFolder(executablePath: string): Promise<void> {
+  return invoke('reveal_app_in_folder', { executablePath });
+}
+
+export async function setAppIgnored(appId: number, ignored: boolean): Promise<void> {
+  return invoke('set_app_ignored', { appId, ignored });
+}
+
+export async function setCustomAppIcon(
+  appId: number, processName: string, data: number[]
+): Promise<string> {
+  return invoke('set_custom_app_icon', { appId, processName, data });
+}
+
+export async function resetCustomAppIcon(appId: number, processName: string): Promise<void> {
+  return invoke('reset_custom_app_icon', { appId, processName });
 }
 
 export async function notifyFrontendReady(): Promise<void> {

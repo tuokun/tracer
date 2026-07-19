@@ -33,6 +33,7 @@ export interface AppItem {
   category_name: string | null;
   category_color: string | null;
   last_used_date: number | null;
+  is_ignored: boolean;
 }
 
 export interface CategoryItem {
@@ -60,4 +61,3 @@ export interface StatsSummary {
   most_active_app: string | null;
   daily_average: number;
 }
-

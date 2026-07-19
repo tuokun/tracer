@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { getConfigValue, setConfigValue } from '$lib/api/commands';
   import { isEnabled, enable, disable } from '@tauri-apps/plugin-autostart';
+  import { getVersion } from '@tauri-apps/api/app';
 
   let flushInterval = $state('15');
   let autoStart = $state(false);
@@ -9,6 +10,7 @@
   let windowW = $state('960');
   let windowH = $state('620');
   let savingWin = $state(false);
+  let appVersion = $state('');
 
   // 主题管理
   let currentTheme = $state('system');
@@ -22,11 +24,12 @@
   ];
 
   onMount(async () => {
-    const [f, enabled, ws, t] = await Promise.all([
+    const [f, enabled, ws, t, version] = await Promise.all([
       getConfigValue('flush_interval_secs'),
       isEnabled(),
       getConfigValue('window_size'),
       getConfigValue('theme'),
+      getVersion(),
     ]);
     if (f) flushInterval = String(Math.floor(parseInt(f) / 60));
     autoStart = enabled;
@@ -36,6 +39,7 @@
       if (h) windowH = h.trim();
     }
     if (t) currentTheme = t;
+    appVersion = version;
   });
 
   async function saveFlush() {
@@ -173,7 +177,7 @@
       <div class="about-metadata">
         <div class="metadata-row">
           <span class="metadata-label">当前版本</span>
-          <span class="metadata-value">v0.1.0</span>
+          <span class="metadata-value">{appVersion ? `v${appVersion}` : '—'}</span>
         </div>
         <div class="metadata-row">
           <span class="metadata-label">项目源码</span>

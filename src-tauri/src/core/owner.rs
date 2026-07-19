@@ -84,6 +84,14 @@ pub fn spawn(
                         let is_tracer = info.name == "tracer.exe";
                         match repo::upsert_app(&conn, &info.name, info.display_name.as_deref(), Some(&info.path)) {
                             Ok(app_id) => {
+                                if repo::is_app_ignored(&conn, app_id).unwrap_or(false) {
+                                    current = None;
+                                    if let Ok(mut s) = session_state.lock() {
+                                        *s = None;
+                                    }
+                                    info!(pid = info.pid, name = %info.name, "前台切换（应用已忽略）");
+                                    continue;
+                                }
                                 let process_name = info.name.clone();
                                 current = Some(Segment { app_id, start: now });
                                 // 更新 session state
