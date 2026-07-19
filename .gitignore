@@ -30,6 +30,7 @@ Thumbs.db
 
 # AI tools
 .agents/
+skills-lock.json
 .claude/
 .gitnexus/
 .codex/
