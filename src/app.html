@@ -2,6 +2,33 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
+    <script>
+      (function() {
+        try {
+          var themeVars = {
+            light: { bg: '#F0F0EC', surface: '#FFFFFF', sidebar: '#F8F6FE', border: '#E0DCF0' },
+            pure:  { bg: '#FFFFFF', surface: '#FFFFFF', sidebar: '#FFFFFF', border: '#F0F0F5' },
+            dark:  { bg: '#0F172A', surface: '#1E293B', sidebar: '#0F172A', border: '#334155' },
+            ocean: { bg: '#0B192C', surface: '#1E3E62', sidebar: '#000000', border: '#1E3E62' },
+            forest:{ bg: '#064E3B', surface: '#065F46', sidebar: '#022C22', border: '#047857' }
+          };
+          var saved = localStorage.getItem('tracer-theme') || 'system';
+          var resolved = saved;
+          if (saved === 'system') {
+            resolved = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          }
+          var vars = themeVars[resolved] || themeVars.light;
+          var root = document.documentElement;
+          root.style.setProperty('--color-bg', vars.bg);
+          root.style.setProperty('--color-surface', vars.surface);
+          root.style.setProperty('--color-sidebar', vars.sidebar);
+          root.style.setProperty('--color-border', vars.border);
+          if (resolved !== 'light') {
+            root.classList.add('theme-' + resolved);
+          }
+        } catch (e) {}
+      })();
+    </script>
     <link rel="icon" href="%sveltekit.assets%/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Tracer - 时间追踪</title>

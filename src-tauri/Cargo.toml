@@ -1,6 +1,6 @@
 [package]
 name = "tracer"
-version = "0.2.1"
+version = "0.1.1"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -31,4 +31,5 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 chrono = "0.4"
 image = { version = "0.25", default-features = false, features = ["png"] }
 base64 = "0.22"
+winreg = "0.52"
 

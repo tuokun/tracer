@@ -4,26 +4,34 @@
   let appWindow: any = null;
   let isMaximized = false;
 
-  onMount(async () => {
-    try {
-      // 动态导入以防 SSR 报错
-      const { getCurrentWindow } = await import('@tauri-apps/api/window');
-      appWindow = getCurrentWindow();
-      
-      // 初始化最大化状态
-      isMaximized = await appWindow.isMaximized();
+  onMount(() => {
+    let unlisten: (() => void) | undefined;
 
-      // 监听窗口大小变化以更新最大化状态
-      const unlisten = await appWindow.onResized(async () => {
+    async function initWindowControls() {
+      try {
+        // 动态导入以防 SSR 报错
+        const { getCurrentWindow } = await import('@tauri-apps/api/window');
+        appWindow = getCurrentWindow();
+
+        // 初始化最大化状态
         isMaximized = await appWindow.isMaximized();
-      });
 
-      return () => {
-        unlisten();
-      };
-    } catch (e) {
-      console.warn('Tauri API 未加载，可能不在桌面环境中运行:', e);
+        // 监听窗口大小变化以更新最大化状态
+        unlisten = await appWindow.onResized(async () => {
+          isMaximized = await appWindow.isMaximized();
+        });
+      } catch (e) {
+        console.warn('Tauri API 未加载，可能不在桌面环境中运行:', e);
+      }
     }
+
+    initWindowControls();
+
+    return () => {
+      if (unlisten) {
+        unlisten();
+      }
+    };
   });
 
   function handleMinimize() {

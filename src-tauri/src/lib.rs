@@ -7,7 +7,7 @@ use rusqlite::Connection;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, LogicalSize, Manager, WebviewUrl, WebviewWindowBuilder,
+    AppHandle, LogicalSize, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder,
 };
 use tracing::info;
 
@@ -254,7 +254,13 @@ fn update_app_display_name(
     repo::update_app_display_name(&conn, app_id, display_name.as_deref()).map_err(|e| e.to_string())
 }
 
-/// 窗口大小还原 & 监听。
+#[tauri::command]
+fn notify_frontend_ready(app: AppHandle) -> Result<(), String> {
+    reveal_hidden_main_window(&app);
+    Ok(())
+}
+
+/// 窗口大小 & 位置还原与监听。
 fn restore_and_monitor_window_size(app: &AppHandle, win: &tauri::WebviewWindow) {
     if let Ok(data_dir) = app.path().app_data_dir() {
         let db_path = data_dir.join("tracer.db");
@@ -278,10 +284,26 @@ fn restore_and_monitor_window_size(app: &AppHandle, win: &tauri::WebviewWindow) 
         };
         let _ = win.set_size(LogicalSize::new(sw, sh));
 
+        // 还原位置（物理坐标）。
+        let pos: Option<(i32, i32)> = db::open(&db_path).ok().and_then(|c| {
+            c.query_row(
+                "SELECT value FROM config WHERE key = 'window_pos'",
+                [],
+                |r| r.get::<_, String>(0),
+            ).ok()
+        }).and_then(|val| {
+            let (a, b) = val.split_once(',')?;
+            Some((a.trim().parse().ok()?, b.trim().parse().ok()?))
+        });
+        if let Some((x, y)) = pos.filter(|(x, y)| *x > -30000 && *y > -30000) {
+            let _ = win.set_position(PhysicalPosition { x, y });
+        }
+
         let app_clone = app.clone();
         let w_clone = win.clone();
-        win.on_window_event(move |event| {
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
+    win.on_window_event(move |event| {
+        match event {
+            tauri::WindowEvent::CloseRequested { .. } => {
                 if let Ok(size) = w_clone.inner_size() {
                     if let Ok(factor) = w_clone.scale_factor() {
                         let logical = size.to_logical::<f64>(factor);
@@ -292,27 +314,122 @@ fn restore_and_monitor_window_size(app: &AppHandle, win: &tauri::WebviewWindow) 
                         }
                     }
                 }
+                if let Ok(p) = w_clone.outer_position() {
+                    if p.x <= -30000 || p.y <= -30000 {
+                        return;
+                    }
+                    if let Some(state) = app_clone.try_state::<DbState>() {
+                        if let Ok(conn) = state.conn.lock() {
+                            let _ = repo::set_config(&conn, "window_pos", &format!("{},{}", p.x, p.y));
+                        }
+                    }
+                }
             }
-        });
+            tauri::WindowEvent::Moved(_) => {
+                if let Ok(p) = w_clone.outer_position() {
+                    if p.x <= -30000 || p.y <= -30000 {
+                        return;
+                    }
+                    if let Some(state) = app_clone.try_state::<DbState>() {
+                        if let Ok(conn) = state.conn.lock() {
+                            let _ = repo::set_config(&conn, "window_pos", &format!("{},{}", p.x, p.y));
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    });
     }
 }
 
 /// 用户是否主动请求退出（区别于关窗触发的 ExitRequested）。
 static SHOULD_QUIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// 显示主窗口：已存在则聚焦，已被销毁则重建。
-fn show_main_window(app: &AppHandle) {
+/// 读取 Windows 注册表判断系统当前是否为深色主题。
+#[cfg(windows)]
+fn system_is_dark() -> bool {
+    use winreg::enums::*;
+    use winreg::RegKey;
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let path = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
+    if let Ok(key) = hkcu.open_subkey(path) {
+        if let Ok(val) = key.get_value::<u32, _>("AppsUseLightTheme") {
+            return val == 0;
+        }
+    }
+    false
+}
+
+#[cfg(not(windows))]
+fn system_is_dark() -> bool {
+    false
+}
+
+/// 根据数据库存储的主题配置，返回与之匹配的窗口原生背景色。
+/// 用于在 WebView2 唤醒的初始几百毫秒内避免露出默认白底。
+fn theme_window_bg(app: &AppHandle) -> tauri::window::Color {
+    let light = tauri::window::Color(240, 240, 236, 255);
+    let Some(state) = app.try_state::<DbState>() else { return light; };
+    let Ok(conn) = state.conn.lock() else { return light; };
+    let theme: String = conn
+        .query_row("SELECT value FROM config WHERE key = 'theme'", [], |r| r.get(0))
+        .unwrap_or_else(|_| "system".to_string());
+    match theme.as_str() {
+        "pure" => tauri::window::Color(255, 255, 255, 255),
+        "dark" => tauri::window::Color(15, 23, 42, 255),
+        "ocean" => tauri::window::Color(11, 25, 44, 255),
+        "forest" => tauri::window::Color(6, 78, 59, 255),
+        "system" => {
+            if system_is_dark() {
+                tauri::window::Color(15, 23, 42, 255)
+            } else {
+                light
+            }
+        }
+        _ => light,
+    }
+}
+
+/// 显示主窗口：原生背景色覆盖 WebView2 恢复期间的默认白底。
+fn show_and_focus_main_window(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
+        let _ = w.unminimize();
         let _ = w.set_focus();
+    }
+}
+
+fn reveal_hidden_main_window(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        if !w.is_visible().unwrap_or(false) {
+            let _ = w.show();
+            let _ = w.unminimize();
+            let _ = w.set_focus();
+        }
+    }
+}
+
+fn show_main_window(app: &AppHandle) {
+    let bg = theme_window_bg(app);
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.set_background_color(Some(bg));
+        show_and_focus_main_window(app);
     } else {
         if let Ok(win) = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
             .title("Tracer")
             .inner_size(960.0, 620.0)
             .decorations(false)
+            .background_color(bg)
+            .visible(false)
             .build()
         {
             restore_and_monitor_window_size(app, &win);
+            let app_clone = app.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+                reveal_hidden_main_window(&app_clone);
+            });
         }
     }
 }
@@ -346,6 +463,7 @@ pub fn run() {
             get_config_value,
             get_app_icon,
             update_app_display_name,
+            notify_frontend_ready,
         ])
         .setup(|app| {
             let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<core::event::Event>();
@@ -392,7 +510,7 @@ pub fn run() {
                 .icon(app.default_window_icon().unwrap().clone())
                 .tooltip("Tracer")
                 .menu(&menu)
-                .menu_on_left_click(false)
+                .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "show" => show_main_window(app),
                     "quit" => {

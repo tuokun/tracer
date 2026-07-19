@@ -95,3 +95,7 @@ export async function getConfigValue(key: string): Promise<string | null> {
 export async function updateAppDisplayName(appId: number, displayName: string | null): Promise<void> {
   return invoke('update_app_display_name', { appId, displayName });
 }
+
+export async function notifyFrontendReady(): Promise<void> {
+  return invoke('notify_frontend_ready');
+}
