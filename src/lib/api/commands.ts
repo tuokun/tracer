@@ -8,6 +8,10 @@ export async function getTodaySummary(): Promise<TodaySummary> {
   return invoke('get_today_summary');
 }
 
+export async function getDisplayName(): Promise<string> {
+  return invoke('get_display_name');
+}
+
 export async function getCurrentSession(): Promise<CurrentSession | null> {
   try {
     return await invoke('get_current_session');
@@ -118,4 +122,13 @@ export async function resetCustomAppIcon(appId: number, processName: string): Pr
 
 export async function notifyFrontendReady(): Promise<void> {
   return invoke('notify_frontend_ready');
+}
+
+export interface UpdateCheckResult {
+  latest_version: string | null;
+  error: string | null;
+}
+
+export async function checkForUpdate(): Promise<UpdateCheckResult> {
+  return invoke('check_for_update');
 }

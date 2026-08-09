@@ -13,6 +13,7 @@ use tauri::{
     AppHandle, LogicalSize, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder,
 };
 use tracing::info;
+use winreg::{enums::HKEY_CURRENT_USER, RegKey};
 
 use core::types::*;
 use core::{db, repo};
@@ -35,12 +36,41 @@ struct IconDir {
     cache: Mutex<HashMap<String, String>>,
 }
 
+/// 安装器选择的显示名，启动时读取一次后常驻内存。
+struct DisplayName {
+    value: &'static str,
+}
+
+fn installed_display_name() -> &'static str {
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let language = hkcu
+        .open_subkey(r"Software\io.github.cgfhsc.tracer")
+        .and_then(|key| key.get_value::<String, _>("DisplayLanguage"))
+        .ok();
+
+    match language.as_deref() {
+        Some("en-US") => "tracer",
+        _ => "踪",
+    }
+}
+
+fn display_name(app: &AppHandle) -> &'static str {
+    app.try_state::<DisplayName>()
+        .map(|name| name.value)
+        .unwrap_or("踪")
+}
+
 // ── Tauri Commands ──────────────────────────────
 
 #[tauri::command]
 fn get_today_summary(state: tauri::State<DbState>) -> Result<TodaySummary, String> {
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     repo::get_today_summary(&conn).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_display_name(name: tauri::State<DisplayName>) -> String {
+    name.value.to_string()
 }
 
 #[tauri::command]
@@ -256,6 +286,75 @@ fn reveal_app_in_folder(executable_path: String) -> Result<(), String> {
         .spawn()
         .map_err(|e| format!("无法打开文件位置: {e}"))?;
     Ok(())
+}
+
+/// 检查 GitHub Releases 是否有新版本。仅返回 latest tag，版本比对交给前端。
+/// 网络异常不返回 Err，而是 Ok(error=...)，让前端区分"无新版"和"网络异常"。
+#[derive(serde::Serialize)]
+struct UpdateCheck {
+    latest_version: Option<String>,
+    error: Option<String>,
+}
+
+const RELEASE_API: &str = "https://github.com/tuokun/Tracer/releases.atom";
+
+/// 从 GitHub releases.atom 提取第一个 entry 的 title（= 最新版本号）。
+/// 用 Atom feed 而非 REST API，规避 api.github.com 的 IP rate limit。
+fn parse_atom_first_tag(feed: &str) -> Option<String> {
+    let entry_pos = feed.find("<entry>")?;
+    let rest = &feed[entry_pos..];
+    let open_start = rest.find("<title>")?;
+    let open_end = open_start + "<title>".len();
+    let close = rest[open_end..].find("</title>")? + open_end;
+    let tag = rest[open_end..close].trim().to_string();
+    if tag.is_empty() { None } else { Some(tag) }
+}
+
+#[tauri::command]
+async fn check_for_update() -> UpdateCheck {
+    let client = match reqwest::Client::builder()
+        .user_agent("Tracer/0.2.0 (https://github.com/tuokun/Tracer)")
+        .timeout(std::time::Duration::from_secs(8))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            return UpdateCheck {
+                latest_version: None,
+                error: Some(format!("构建 HTTP 客户端失败: {e}")),
+            }
+        }
+    };
+
+    match client.get(RELEASE_API).send().await {
+        Ok(res) => {
+            let status = res.status();
+            if !status.is_success() {
+                let body = res.text().await.unwrap_or_default();
+                return UpdateCheck {
+                    latest_version: None,
+                    error: Some(format!("HTTP {status}: {body}")),
+                };
+            }
+            match res.text().await {
+                Ok(text) => match parse_atom_first_tag(&text) {
+                    Some(tag) => UpdateCheck { latest_version: Some(tag), error: None },
+                    None => UpdateCheck {
+                        latest_version: None,
+                        error: Some("Atom feed 中找不到版本号".into()),
+                    },
+                },
+                Err(e) => UpdateCheck {
+                    latest_version: None,
+                    error: Some(format!("读取响应失败: {e}")),
+                },
+            }
+        }
+        Err(e) => UpdateCheck {
+            latest_version: None,
+            error: Some(format!("网络异常: {e}")),
+        },
+    }
 }
 
 #[tauri::command]
@@ -547,7 +646,7 @@ fn show_main_window(app: &AppHandle) {
         show_and_focus_main_window(app);
     } else {
         if let Ok(win) = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
-            .title("Tracer")
+            .title(display_name(app))
             .inner_size(960.0, 620.0)
             .decorations(false)
             .background_color(bg)
@@ -574,8 +673,12 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_autostart::init(Default::default(), None))
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            show_main_window(app);
+        }))
         .invoke_handler(tauri::generate_handler![
             get_today_summary,
+            get_display_name,
             get_current_session,
             get_app_rank,
             get_hourly_heatmap,
@@ -598,8 +701,15 @@ pub fn run() {
             reset_custom_app_icon,
             update_app_display_name,
             notify_frontend_ready,
+            check_for_update,
         ])
         .setup(|app| {
+            let display_name = installed_display_name();
+            app.manage(DisplayName { value: display_name });
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.set_title(display_name);
+            }
+
             let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<core::event::Event>();
 
             // 数据库（写连接归 owner task）。
@@ -642,7 +752,7 @@ pub fn run() {
             let menu = Menu::with_items(app, &[&show, &quit])?;
             let _tray = TrayIconBuilder::with_id("tray-main")
                 .icon(app.default_window_icon().unwrap().clone())
-                .tooltip("Tracer")
+                .tooltip(display_name)
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id().as_ref() {

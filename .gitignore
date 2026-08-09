@@ -32,7 +32,7 @@ Thumbs.db
 .agents/
 skills-lock.json
 .claude/
-.gitnexus/
+.codegraph/
 .codex/
 AGENTS.md
 CLAUDE.md

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { getConfigValue, setConfigValue } from '$lib/api/commands';
+  import { getConfigValue, getDisplayName, setConfigValue, checkForUpdate as checkForUpdateApi } from '$lib/api/commands';
   import { isEnabled, enable, disable } from '@tauri-apps/plugin-autostart';
   import { getVersion } from '@tauri-apps/api/app';
 
@@ -11,6 +11,53 @@
   let windowH = $state('620');
   let savingWin = $state(false);
   let appVersion = $state('');
+  let displayName = $state('踪');
+
+  // 检查更新（手动触发，不轮询）
+  type UpdateState = 'idle' | 'checking' | 'latest' | 'available' | 'error';
+  let updateState = $state<UpdateState>('idle');
+  let latestVersion = $state('');
+  let errorMsg = $state('');
+  let latestTimeout: ReturnType<typeof setTimeout> | null = null;
+  const RELEASE_PAGE = 'https://github.com/tuokun/Tracer/releases/latest';
+
+  function compareVersions(a: string, b: string): number {
+    const an = a.replace(/^v/, '').split('.').map(n => parseInt(n, 10) || 0);
+    const bn = b.replace(/^v/, '').split('.').map(n => parseInt(n, 10) || 0);
+    const len = Math.max(an.length, bn.length);
+    for (let i = 0; i < len; i++) {
+      const av = an[i] ?? 0;
+      const bv = bn[i] ?? 0;
+      if (av !== bv) return av > bv ? 1 : -1;
+    }
+    return 0;
+  }
+
+  async function checkForUpdate() {
+    if (updateState === 'checking' || !appVersion) return;
+    if (latestTimeout) {
+      clearTimeout(latestTimeout);
+      latestTimeout = null;
+    }
+    updateState = 'checking';
+    const res = await checkForUpdateApi();
+    if (res.error || !res.latest_version) {
+      console.error('检查更新失败:', res.error);
+      errorMsg = res.error ?? '未知错误';
+      updateState = 'error';
+      return;
+    }
+    if (compareVersions(res.latest_version, appVersion) > 0) {
+      latestVersion = res.latest_version.replace(/^v/, '');
+      updateState = 'available';
+    } else {
+      updateState = 'latest';
+      latestTimeout = setTimeout(() => {
+        updateState = 'idle';
+        latestTimeout = null;
+      }, 5000);
+    }
+  }
 
   // 主题管理
   let currentTheme = $state('system');
@@ -24,12 +71,13 @@
   ];
 
   onMount(async () => {
-    const [f, enabled, ws, t, version] = await Promise.all([
+    const [f, enabled, ws, t, version, name] = await Promise.all([
       getConfigValue('flush_interval_secs'),
       isEnabled(),
       getConfigValue('window_size'),
       getConfigValue('theme'),
       getVersion(),
+      getDisplayName(),
     ]);
     if (f) flushInterval = String(Math.floor(parseInt(f) / 60));
     autoStart = enabled;
@@ -40,6 +88,7 @@
     }
     if (t) currentTheme = t;
     appVersion = version;
+    displayName = name;
   });
 
   async function saveFlush() {
@@ -81,6 +130,10 @@
       console.error("打开链接失败:", e);
       window.open(url, '_blank');
     }
+  }
+
+  async function openReleasePage() {
+    await openExternalLink(RELEASE_PAGE);
   }
 </script>
 
@@ -167,17 +220,35 @@
     </div>
   </div>
 
-  <!-- 关于 Tracer 卡片 -->
+  <!-- 关于应用卡片 -->
   <div class="card mt-6">
     <div class="about-section">
-      <div class="section-title">关于 Tracer</div>
+      <div class="section-title">关于 {displayName}</div>
       <p class="about-desc">
-        Tracer 是一款轻量级、无感知的个人电脑活动效率分析工具。它可以自动记录您在各应用下的专注时间，并提供优雅的统计与热力图分析，帮助您理清每天的时间走向。
+        {displayName} 是一款轻量级、无感知的个人电脑活动效率分析工具。它可以自动记录您在各应用下的专注时间，并提供优雅的统计与热力图分析，帮助您理清每天的时间走向。
       </p>
       <div class="about-metadata">
         <div class="metadata-row">
           <span class="metadata-label">当前版本</span>
           <span class="metadata-value">{appVersion ? `v${appVersion}` : '—'}</span>
+        </div>
+        <div class="metadata-row">
+          <span class="metadata-label">检查更新</span>
+          <div class="update-action">
+            {#if updateState === 'checking'}
+              <span class="update-status"><span class="spinner"></span>正在检查…</span>
+            {:else if updateState === 'latest'}
+              <span class="update-status success">✓ 已是最新版本</span>
+            {:else if updateState === 'available'}
+              <span class="update-status">发现 v{latestVersion}</span>
+              <button class="setting-save" onclick={openReleasePage}>前往下载</button>
+            {:else if updateState === 'error'}
+              <span class="update-status danger" title={errorMsg}>⚠ {errorMsg}</span>
+              <button class="setting-save" onclick={checkForUpdate}>重试</button>
+            {:else}
+              <button class="setting-save" onclick={checkForUpdate}>检查更新</button>
+            {/if}
+          </div>
         </div>
         <div class="metadata-row">
           <span class="metadata-label">项目源码</span>
@@ -374,11 +445,27 @@
   }
 
   .about-metadata {
-    @apply flex flex-col gap-2.5 border-t border-border pt-3.5;
+    display: grid;
+    grid-template-columns: max-content max-content;
+    justify-content: space-between;
+    align-items: center;
+    row-gap: 10px;
+    border-top: 1px solid var(--color-border);
+    padding-top: 14px;
   }
 
   .metadata-row {
-    @apply flex justify-between items-center;
+    display: contents;
+  }
+
+  .metadata-label {
+    justify-self: start;
+  }
+
+  .metadata-value,
+  .update-action,
+  .link-btn {
+    justify-self: center;
   }
 
   .metadata-label {
@@ -450,4 +537,35 @@
   .toggle:hover .toggle-slider {
     box-shadow: 0 0 0 2px var(--color-primary-hover);
   }
+
+  /* 检查更新 */
+  .update-action {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+  }
+
+  .update-status {
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 0.45rem;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .update-status.success { color: var(--color-success); }
+  .update-status.danger { color: #EF4444; }
+
+  .spinner {
+    width: 8px;
+    height: 8px;
+    border: 1.5px solid currentColor;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
 </style>
