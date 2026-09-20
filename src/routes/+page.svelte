@@ -207,7 +207,7 @@
     </div>
   </div>
 
-  <div class="grid-2 mt-4">
+  <div class="grid-2">
     <div class="card p-3">
       <div class="panel-title">应用排行</div>
       <div class="rank-list">
@@ -239,7 +239,7 @@
     </div>
   </div>
 
-  <div class="card p-3 mt-4">
+  <div class="card p-3 activity-card">
     <div class="panel-title">24h 活动热力</div>
     <Chart options={heatOptions} height={100} class="mt-2" />
   </div>
@@ -248,23 +248,22 @@
 <style>
   .page { max-width: 900px; }
 
-  .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
-  .page-title { font-family: 'Segoe UI Variable Display','Segoe UI',sans-serif; font-weight: 600; font-size: 0.85rem; color: theme('colors.text.primary'); margin: 0; }
-  .page-date { font-family: 'Segoe UI',sans-serif; font-size: 0.5rem; color: theme('colors.text.tertiary'); }
+  .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 7px; }
+  .page-title { font-family: 'Segoe UI Variable Display','Segoe UI',sans-serif; font-weight: 600; font-size: var(--font-size-page-title); color: theme('colors.text.primary'); margin: 0; }
+  .page-date { font-family: 'Segoe UI',sans-serif; font-size: var(--font-size-body); color: theme('colors.text.tertiary'); }
 
   /* 新的不对称双栏布局 */
   .stats-layout {
     display: grid;
     grid-template-columns: minmax(0, 5fr) minmax(0, 3fr);
     gap: 1rem;
-    margin-bottom: 1rem;
-    height: 106px;
+    margin-bottom: 4px;
+    min-height: 106px;
     width: 100%;
   }
 
   /* 左侧主大卡片 */
   .main-stat-card {
-    height: 100%;
     display: flex;
     flex-direction: column;
     padding: 0.65rem 0.85rem;
@@ -290,7 +289,7 @@
 
   .lbl-main {
     font-family: 'Segoe UI', sans-serif;
-    font-size: 0.48rem;
+    font-size: var(--font-size-body);
     color: theme('colors.text.secondary');
     font-weight: 500;
   }
@@ -352,13 +351,12 @@
 
   .lbl-sub {
     font-family: 'Segoe UI', sans-serif;
-    font-size: 0.45rem;
+    font-size: var(--font-size-body);
     color: theme('colors.text.tertiary');
   }
 
   /* 右侧堆叠长条卡片组 */
   .right-stack-layout {
-    height: 100%;
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
@@ -411,7 +409,7 @@
   }
 
   .app-icon-placeholder-sub {
-    font-size: 0.55rem;
+    font-size: var(--font-size-section-title);
   }
 
   .sub-row-details {
@@ -424,7 +422,7 @@
 
   .sub-row-label {
     font-family: 'Segoe UI', sans-serif;
-    font-size: 0.42rem;
+    font-size: var(--font-size-body);
     color: theme('colors.text.tertiary');
     text-transform: uppercase;
     letter-spacing: 0.02em;
@@ -433,7 +431,7 @@
   .sub-row-title {
     font-family: 'Segoe UI', sans-serif;
     font-weight: 600;
-    font-size: 0.55rem;
+    font-size: var(--font-size-section-title);
     color: theme('colors.text.primary');
     overflow: hidden;
     text-overflow: ellipsis;
@@ -451,7 +449,7 @@
 
   .sub-row-value {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 0.5rem;
+    font-size: var(--font-size-body);
     font-weight: 600;
     color: theme('colors.text.secondary');
   }
@@ -509,25 +507,25 @@
   .card { @apply bg-surface border border-border rounded shadow-card; }
   .p-3 { padding: 0.75rem; }
   .mt-2 { margin-top: 0.5rem; }
-  .mt-4 { margin-top: 1rem; }
 
-  .panel-title { font-family: 'Segoe UI Variable Display','Segoe UI',sans-serif; font-weight: 600; font-size: 0.5rem; color: theme('colors.text.primary'); }
+  .panel-title { font-family: 'Segoe UI Variable Display','Segoe UI',sans-serif; font-weight: 600; font-size: var(--font-size-body); color: theme('colors.text.primary'); }
 
-  .grid-2 { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 3fr); gap: 1rem; width: 100%; box-sizing: border-box; }
+  .grid-2 { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 3fr); gap: 1rem; width: 100%; margin-bottom: 4px; box-sizing: border-box; }
+  .activity-card { margin-top: 0; }
 
   .rank-list { display: flex; flex-direction: column; gap: 0.25rem; margin-top: 0.375rem; }
   .rank-item { display: flex; align-items: center; gap: 0.25rem; }
-  .rank-num { font-family: 'JetBrains Mono',monospace; font-size: 0.5rem; font-weight: 700; color: theme('colors.text.secondary'); width: 10px; text-align: left; flex-shrink: 0; }
+  .rank-num { font-family: 'JetBrains Mono',monospace; font-size: var(--font-size-body); font-weight: 700; color: theme('colors.text.secondary'); width: 10px; text-align: left; flex-shrink: 0; }
   .rank-item:nth-child(1) .rank-num { color: #F5A623; }
   .rank-item:nth-child(2) .rank-num { color: theme('colors.text.primary'); }
   .rank-item:nth-child(3) .rank-num { color: theme('colors.text.primary'); }
   .rank-icon { width: 18px; height: 18px; flex-shrink: 0; }
   .rank-icon-img { width: 18px; height: 18px; border-radius: 3px; }
-  .app-icon-placeholder { width: 18px; height: 18px; border-radius: 3px; background: theme('colors.border'); display: flex; align-items: center; justify-content: center; font-family: 'Segoe UI',sans-serif; font-size: 0.4rem; color: theme('colors.text.tertiary'); }
-  .rank-name { font-family: 'Segoe UI',sans-serif; font-weight: 600; font-size: 0.5rem; color: theme('colors.text.primary'); width: 125px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 0; }
+  .app-icon-placeholder { width: 18px; height: 18px; border-radius: 3px; background: theme('colors.border'); display: flex; align-items: center; justify-content: center; font-family: 'Segoe UI',sans-serif; font-size: var(--font-size-caption); color: theme('colors.text.tertiary'); }
+  .rank-name { font-family: 'Segoe UI',sans-serif; font-weight: 600; font-size: var(--font-size-body); color: theme('colors.text.primary'); width: 125px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 0; }
   .rank-bar-wrap { flex: 1; height: 5px; background: theme('colors.heatmap.bg'); border-radius: 3px; overflow: hidden; }
   .rank-bar { height: 100%; background: theme('colors.primary.DEFAULT'); border-radius: 3px; transition: width 0.3s; }
-  .rank-time { font-family: 'JetBrains Mono',monospace; font-size: 0.5rem; font-weight: 600; color: theme('colors.text.primary'); width: 50px; text-align: right; flex-shrink: 0; }
-  .rank-cat { font-family: 'Segoe UI',sans-serif; font-size: 0.4rem; border-radius: 4px; padding: 0 0.25rem; white-space: nowrap; }
-  .text-empty { font-family: 'Segoe UI',sans-serif; font-size: 0.5rem; color: theme('colors.text.tertiary'); text-align: center; padding: 0.5rem 0; }
+  .rank-time { font-family: 'JetBrains Mono',monospace; font-size: var(--font-size-body); font-weight: 600; color: theme('colors.text.primary'); width: 50px; text-align: right; flex-shrink: 0; }
+  .rank-cat { font-family: 'Segoe UI',sans-serif; font-size: var(--font-size-caption); border-radius: 4px; padding: 0 0.25rem; white-space: nowrap; }
+  .text-empty { font-family: 'Segoe UI',sans-serif; font-size: var(--font-size-body); color: theme('colors.text.tertiary'); text-align: center; padding: 0.5rem 0; }
 </style>

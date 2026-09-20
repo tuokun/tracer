@@ -15,6 +15,11 @@ use tauri::{
 use tracing::info;
 use winreg::{enums::HKEY_CURRENT_USER, RegKey};
 
+use core::sync::{
+    merge, package,
+    service::{self, SyncManager},
+    webdav::WebDavClient,
+};
 use core::types::*;
 use core::{db, repo};
 
@@ -79,7 +84,11 @@ fn get_current_session(
     session: tauri::State<SessionState>,
 ) -> Result<CurrentSession, String> {
     let current = session.inner.lock().map_err(|e| e.to_string())?.clone();
-    let last = session.last_active.lock().map_err(|e| e.to_string())?.clone();
+    let last = session
+        .last_active
+        .lock()
+        .map_err(|e| e.to_string())?
+        .clone();
     let mut sess = current.ok_or_else(|| "暂无前台会话".to_string())?;
     sess.current_duration = chrono::Local::now().timestamp() - sess.start_timestamp;
     // 是自身 tracer → 用上一次非 tracer 应用替代
@@ -94,7 +103,8 @@ fn get_current_session(
         if let Ok(conn) = db.conn.lock() {
             sess.display_name = conn
                 .query_row(
-                    "SELECT display_name FROM apps WHERE process_name=?1",
+                    "SELECT COALESCE(custom_alias, system_display_name, process_name) FROM apps \
+                     WHERE origin_device_id=(SELECT value FROM config WHERE key='local_device_id') AND process_name=?1",
                     rusqlite::params![sess.process_name],
                     |r| r.get(0),
                 )
@@ -106,9 +116,16 @@ fn get_current_session(
 }
 
 #[tauri::command]
-fn get_app_rank(state: tauri::State<DbState>, start: i64, end: i64, limit: Option<usize>) -> Result<Vec<AppRankItem>, String> {
+fn get_app_rank(
+    state: tauri::State<DbState>,
+    start: i64,
+    end: i64,
+    limit: Option<usize>,
+    device_id: Option<String>,
+) -> Result<Vec<AppRankItem>, String> {
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    repo::get_app_rank(&conn, start, end, limit.unwrap_or(10)).map_err(|e| e.to_string())
+    repo::get_app_rank(&conn, start, end, limit.unwrap_or(10), device_id.as_deref())
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -155,7 +172,8 @@ fn save_category(
     rules: Option<String>,
 ) -> Result<i64, String> {
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    repo::save_category(&conn, id, &name, color.as_deref(), rules.as_deref()).map_err(|e| e.to_string())
+    repo::save_category(&conn, id, &name, color.as_deref(), rules.as_deref())
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -181,29 +199,53 @@ fn get_stats_range(
     start: i64,
     end: i64,
     limit: Option<usize>,
+    device_id: Option<String>,
 ) -> Result<Vec<(String, Vec<i64>)>, String> {
     let g = core::repo::BarGranularity::from_str(&granularity)
         .ok_or_else(|| format!("未知粒度: {granularity}"))?;
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    repo::get_stats_range(&conn, g, start, end, limit.unwrap_or(5)).map_err(|e| e.to_string())
+    repo::get_stats_range(
+        &conn,
+        g,
+        start,
+        end,
+        limit.unwrap_or(5),
+        device_id.as_deref(),
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn get_stats_radar(state: tauri::State<DbState>, start: i64, end: i64) -> Result<Vec<RadarPoint>, String> {
+fn get_stats_radar(
+    state: tauri::State<DbState>,
+    start: i64,
+    end: i64,
+    device_id: Option<String>,
+) -> Result<Vec<RadarPoint>, String> {
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    repo::get_stats_radar(&conn, start, end).map_err(|e| e.to_string())
+    repo::get_stats_radar(&conn, start, end, device_id.as_deref()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn get_stats_pie(state: tauri::State<DbState>, start: i64, end: i64) -> Result<Vec<PieSlice>, String> {
+fn get_stats_pie(
+    state: tauri::State<DbState>,
+    start: i64,
+    end: i64,
+    device_id: Option<String>,
+) -> Result<Vec<PieSlice>, String> {
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    repo::get_stats_pie(&conn, start, end).map_err(|e| e.to_string())
+    repo::get_stats_pie(&conn, start, end, device_id.as_deref()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn get_stats_summary(state: tauri::State<DbState>, start: i64, end: i64) -> Result<StatsSummary, String> {
+fn get_stats_summary(
+    state: tauri::State<DbState>,
+    start: i64,
+    end: i64,
+    device_id: Option<String>,
+) -> Result<StatsSummary, String> {
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    repo::get_stats_summary(&conn, start, end).map_err(|e| e.to_string())
+    repo::get_stats_summary(&conn, start, end, device_id.as_deref()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -259,8 +301,7 @@ fn get_app_icon(
     };
     let path = match custom_path {
         Some(path) if Path::new(&path).is_file() => path,
-        _ => core::iconer::extract(&exe_path, &state.path, &process_name)
-            .ok_or("无关联图标")?,
+        _ => core::iconer::extract(&exe_path, &state.path, &process_name).ok_or("无关联图标")?,
     };
     let mut f = std::fs::File::open(&path).map_err(|e| e.to_string())?;
     let mut buf = Vec::new();
@@ -307,7 +348,11 @@ fn parse_atom_first_tag(feed: &str) -> Option<String> {
     let open_end = open_start + "<title>".len();
     let close = rest[open_end..].find("</title>")? + open_end;
     let tag = rest[open_end..close].trim().to_string();
-    if tag.is_empty() { None } else { Some(tag) }
+    if tag.is_empty() {
+        None
+    } else {
+        Some(tag)
+    }
 }
 
 #[tauri::command]
@@ -338,7 +383,10 @@ async fn check_for_update() -> UpdateCheck {
             }
             match res.text().await {
                 Ok(text) => match parse_atom_first_tag(&text) {
-                    Some(tag) => UpdateCheck { latest_version: Some(tag), error: None },
+                    Some(tag) => UpdateCheck {
+                        latest_version: Some(tag),
+                        error: None,
+                    },
                     None => UpdateCheck {
                         latest_version: None,
                         error: Some("Atom feed 中找不到版本号".into()),
@@ -375,12 +423,18 @@ fn set_app_ignored(
             )
             .map_err(|e| e.to_string())?;
         if let Ok(mut current) = session.inner.lock() {
-            if current.as_ref().is_some_and(|s| s.process_name == process_name) {
+            if current
+                .as_ref()
+                .is_some_and(|s| s.process_name == process_name)
+            {
                 *current = None;
             }
         }
         if let Ok(mut last) = session.last_active.lock() {
-            if last.as_ref().is_some_and(|s| s.process_name == process_name) {
+            if last
+                .as_ref()
+                .is_some_and(|s| s.process_name == process_name)
+            {
                 *last = None;
             }
         }
@@ -401,7 +455,8 @@ fn set_custom_app_icon(
     }
     {
         let conn = db.conn.lock().map_err(|e| e.to_string())?;
-        let (stored_id, _) = repo::get_app_icon_info(&conn, &process_name).map_err(|e| e.to_string())?;
+        let (stored_id, _) =
+            repo::get_app_icon_info(&conn, &process_name).map_err(|e| e.to_string())?;
         if stored_id != app_id {
             return Err("应用标识不匹配".to_string());
         }
@@ -440,7 +495,8 @@ fn reset_custom_app_icon(
 ) -> Result<(), String> {
     let old_path = {
         let conn = db.conn.lock().map_err(|e| e.to_string())?;
-        let (stored_id, path) = repo::get_app_icon_info(&conn, &process_name).map_err(|e| e.to_string())?;
+        let (stored_id, path) =
+            repo::get_app_icon_info(&conn, &process_name).map_err(|e| e.to_string())?;
         if stored_id != app_id {
             return Err("应用标识不匹配".to_string());
         }
@@ -484,6 +540,548 @@ fn update_app_display_name(
 }
 
 #[tauri::command]
+async fn configure_sync(
+    state: tauri::State<'_, DbState>,
+    input: SyncSetupInput,
+) -> Result<SyncSetupResult, String> {
+    if input.sync_password != input.sync_password_confirm {
+        return Err("两次输入的同步密码不一致".into());
+    }
+    if input.sync_password.is_empty() {
+        return Err("同步密码不能为空".into());
+    }
+    let client = WebDavClient::new(
+        &input.endpoint,
+        input.username.clone(),
+        input.webdav_password.clone(),
+        input.directory.as_deref(),
+    )
+    .map_err(|e| e.to_string())?;
+    if client.is_insecure() && !input.allow_insecure_http {
+        return Err("HTTP WebDAV 会暴露用户名和密码，请确认风险后再保存".into());
+    }
+    client.ensure_directory().await.map_err(|e| e.to_string())?;
+    let concurrency = client
+        .detect_concurrency()
+        .await
+        .map_err(|e| e.to_string())?;
+    let remote = client
+        .get("manifest.tracer")
+        .await
+        .map_err(|e| e.to_string())?;
+    let (joined, master, mut payload, original) = if let Some(file) = &remote {
+        let opened =
+            package::open_manifest(&file.bytes, &input.sync_password).map_err(|e| e.to_string())?;
+        (
+            true,
+            opened.master_key,
+            opened.payload,
+            Some(file.bytes.clone()),
+        )
+    } else {
+        let (bytes, payload, master) =
+            package::new_space(&input.sync_password).map_err(|e| e.to_string())?;
+        (false, master, payload, Some(bytes))
+    };
+    {
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        merge::apply_metadata(&conn, &payload.devices, &payload.apps, &payload.categories)
+            .map_err(|e| e.to_string())?;
+        repo::set_local_device_name(&conn, &input.device_name).map_err(|e| e.to_string())?;
+        let local_id = db::local_device_id(&conn).map_err(|e| e.to_string())?;
+        let local_devices = repo::list_devices(&conn).map_err(|e| e.to_string())?;
+        payload.devices =
+            merge::merge_devices(&payload.devices, &local_devices).map_err(|e| e.to_string())?;
+        payload.devices.retain(|v| v.device_id != local_id);
+        payload.devices.extend(
+            local_devices
+                .into_iter()
+                .filter(|v| v.device_id == local_id),
+        );
+        let local_apps = repo::export_app_metadata(&conn).map_err(|e| e.to_string())?;
+        payload.apps = merge::merge_apps(&payload.apps, &local_apps).map_err(|e| e.to_string())?;
+        payload.apps.retain(|v| v.origin_device_id != local_id);
+        payload.apps.extend(
+            local_apps
+                .into_iter()
+                .filter(|v| v.origin_device_id == local_id),
+        );
+        payload.categories = merge::merge_categories(
+            &payload.categories,
+            &repo::export_categories(&conn).map_err(|e| e.to_string())?,
+        );
+    }
+    let manifest = package::replace_manifest_payload(original.as_ref().unwrap(), &master, &payload)
+        .map_err(|e| e.to_string())?;
+    client
+        .put(
+            "manifest.tracer",
+            manifest,
+            remote.as_ref().and_then(|v| v.etag.as_deref()),
+            remote.is_none(),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    let stored = service::StoredSyncConfig::new(
+        input.endpoint,
+        input.directory,
+        input.username,
+        input.webdav_password,
+        &master,
+        concurrency,
+    )
+    .map_err(|e| e.to_string())?;
+    {
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        service::save_stored_config(&conn, &stored).map_err(|e| e.to_string())?;
+    }
+    Ok(SyncSetupResult {
+        joined_existing: joined,
+        insecure_http: client.is_insecure(),
+        concurrency_mode: format!("{:?}", concurrency).to_lowercase(),
+    })
+}
+
+#[tauri::command]
+async fn get_sync_overview(
+    state: tauri::State<'_, DbState>,
+    manager: tauri::State<'_, SyncManager>,
+) -> Result<SyncOverview, String> {
+    let (current, devices, years, history, stored) = {
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        let current = db::local_device_id(&conn).map_err(|e| e.to_string())?;
+        (
+            current,
+            repo::list_devices(&conn).map_err(|e| e.to_string())?,
+            repo::available_years(&conn).map_err(|e| e.to_string())?,
+            repo::sync_history(&conn).map_err(|e| e.to_string())?,
+            service::load_stored_config(&conn).map_err(|e| e.to_string())?,
+        )
+    };
+    let current_name = devices
+        .iter()
+        .find(|v| v.device_id == current)
+        .map(|v| v.display_name.clone())
+        .unwrap_or_else(|| "Windows PC".into());
+    let last_success_at = history.iter().find(|v| v.success).map(|v| v.created_at);
+    Ok(SyncOverview {
+        configured: stored.is_some(),
+        insecure_http: stored
+            .as_ref()
+            .is_some_and(|v| v.endpoint.starts_with("http://")),
+        concurrency_mode: stored
+            .as_ref()
+            .map(|v| format!("{:?}", v.concurrency).to_lowercase()),
+        current_device_id: current.clone(),
+        current_device_name: current_name,
+        devices: devices
+            .into_iter()
+            .map(|v| DeviceItem {
+                is_current: v.device_id == current,
+                device_id: v.device_id,
+                display_name: v.display_name,
+            })
+            .collect(),
+        years,
+        last_success_at,
+        history,
+        status: manager.status().await,
+    })
+}
+
+#[tauri::command]
+async fn sync_now(
+    state: tauri::State<'_, DbState>,
+    manager: tauri::State<'_, SyncManager>,
+    year: i32,
+) -> Result<service::SyncRunResult, String> {
+    let stored = {
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        service::load_stored_config(&conn).map_err(|e| e.to_string())?
+    }
+    .ok_or("尚未配置 WebDAV 同步")?;
+    let (client, master) = stored.client_and_master().map_err(|e| e.to_string())?;
+    let result = manager.run(client, master, year, stored.concurrency).await;
+    {
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        match &result {
+            Ok(v) => {
+                let _ = repo::record_sync_history(
+                    &conn,
+                    year,
+                    true,
+                    v.uploaded_bytes,
+                    v.downloaded_bytes,
+                    v.imported_segments,
+                    v.duration_ms,
+                    None,
+                );
+            }
+            Err(e) => {
+                let _ =
+                    repo::record_sync_history(&conn, year, false, 0, 0, 0, 0, Some(&e.to_string()));
+            }
+        }
+    }
+    result.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn cancel_sync(manager: tauri::State<SyncManager>) {
+    manager.cancel();
+}
+#[tauri::command]
+fn disconnect_sync(state: tauri::State<DbState>) -> Result<(), String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    service::disconnect(&conn).map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn rename_sync_device(state: tauri::State<DbState>, name: String) -> Result<(), String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::set_local_device_name(&conn, &name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn change_sync_password(
+    state: tauri::State<'_, DbState>,
+    old_password: Option<String>,
+    new_password: String,
+    new_password_confirm: String,
+) -> Result<(), String> {
+    if new_password.is_empty() || new_password != new_password_confirm {
+        return Err("新密码不能为空，且两次输入必须一致".into());
+    }
+    let stored = {
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        service::load_stored_config(&conn).map_err(|e| e.to_string())?
+    }
+    .ok_or("尚未配置 WebDAV 同步")?;
+    let (client, master) = stored.client_and_master().map_err(|e| e.to_string())?;
+    let remote = client
+        .get("manifest.tracer")
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or("远端控制文件不存在")?;
+    let changed = package::change_password(
+        &remote.bytes,
+        old_password.as_deref(),
+        Some(master),
+        &new_password,
+    )
+    .map_err(|e| e.to_string())?;
+    client
+        .put("manifest.tracer", changed, remote.etag.as_deref(), false)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn reset_sync_space(
+    state: tauri::State<'_, DbState>,
+    manager: tauri::State<'_, SyncManager>,
+    new_password: String,
+    new_password_confirm: String,
+    years: Vec<i32>,
+    confirmed: bool,
+) -> Result<(), String> {
+    if !confirmed {
+        return Err("重置同步空间需要二次确认".into());
+    }
+    if new_password.is_empty() || new_password != new_password_confirm {
+        return Err("新密码不能为空，且两次输入必须一致".into());
+    }
+    if manager.is_running().await {
+        return Err("同步进行中，不能重置".into());
+    }
+    let stored = {
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        service::load_stored_config(&conn).map_err(|e| e.to_string())?
+    }
+    .ok_or("尚未配置 WebDAV 同步")?;
+    let (client, _) = stored.client_and_master().map_err(|e| e.to_string())?;
+    client.ensure_directory().await.map_err(|e| e.to_string())?;
+    manager.checkpoint().await.map_err(|e| e.to_string())?;
+    for name in client.list_names().await.map_err(|e| e.to_string())? {
+        if name == "manifest.tracer" || name.ends_with(".tracer-sync") {
+            client.delete(&name).await.map_err(|e| e.to_string())?;
+        }
+    }
+    let (initial, mut payload, master) =
+        package::new_space(&new_password).map_err(|e| e.to_string())?;
+    let packages = {
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        payload.devices = repo::list_devices(&conn).map_err(|e| e.to_string())?;
+        payload.apps = repo::export_app_metadata(&conn).map_err(|e| e.to_string())?;
+        payload.categories = repo::export_categories(&conn).map_err(|e| e.to_string())?;
+        let mut built = Vec::new();
+        for year in &years {
+            let rows = repo::export_segments(&conn, *year).map_err(|e| e.to_string())?;
+            let temp = tempfile::NamedTempFile::new().map_err(|e| e.to_string())?;
+            let descriptor = package::build_year_package(
+                temp.path(),
+                &payload.sync_space_id,
+                &payload.generation_id,
+                *year,
+                &uuid::Uuid::new_v4().to_string(),
+                &rows,
+                &master,
+            )
+            .map_err(|e| e.to_string())?;
+            let bytes = std::fs::read(temp.path()).map_err(|e| e.to_string())?;
+            built.push((*year, bytes, descriptor));
+        }
+        built
+    };
+    for (year, bytes, descriptor) in packages {
+        client
+            .put(&format!("{year}.tracer-sync"), bytes, None, true)
+            .await
+            .map_err(|e| e.to_string())?;
+        payload.packages.push(descriptor);
+    }
+    payload.packages.sort_by_key(|v| v.year);
+    let manifest = package::replace_manifest_payload(&initial, &master, &payload)
+        .map_err(|e| e.to_string())?;
+    client
+        .put("manifest.tracer", manifest, None, true)
+        .await
+        .map_err(|e| e.to_string())?;
+    let (username, password) = stored.credentials().map_err(|e| e.to_string())?;
+    let updated = service::StoredSyncConfig::new(
+        stored.endpoint,
+        stored.directory,
+        username,
+        password,
+        &master,
+        stored.concurrency,
+    )
+    .map_err(|e| e.to_string())?;
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    service::save_stored_config(&conn, &updated).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn force_reset_sync_space(
+    state: tauri::State<'_, DbState>,
+    manager: tauri::State<'_, SyncManager>,
+    input: SyncSetupInput,
+    years: Vec<i32>,
+    confirmed: bool,
+) -> Result<(), String> {
+    if !confirmed {
+        return Err("重置同步空间需要二次确认".into());
+    }
+    if input.sync_password.is_empty() || input.sync_password != input.sync_password_confirm {
+        return Err("新密码不能为空，且两次输入必须一致".into());
+    }
+    if manager.is_running().await {
+        return Err("同步进行中，不能重置".into());
+    }
+    let client = WebDavClient::new(
+        &input.endpoint,
+        input.username.clone(),
+        input.webdav_password.clone(),
+        input.directory.as_deref(),
+    )
+    .map_err(|e| e.to_string())?;
+    if client.is_insecure() && !input.allow_insecure_http {
+        return Err("HTTP WebDAV 会暴露用户名和密码，请确认风险后再重置".into());
+    }
+    client.ensure_directory().await.map_err(|e| e.to_string())?;
+    let concurrency = client
+        .detect_concurrency()
+        .await
+        .map_err(|e| e.to_string())?;
+    manager.checkpoint().await.map_err(|e| e.to_string())?;
+    for name in client.list_names().await.map_err(|e| e.to_string())? {
+        if name == "manifest.tracer" || name.ends_with(".tracer-sync") {
+            client.delete(&name).await.map_err(|e| e.to_string())?;
+        }
+    }
+    let (initial, mut payload, master) =
+        package::new_space(&input.sync_password).map_err(|e| e.to_string())?;
+    let packages = {
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        repo::set_local_device_name(&conn, &input.device_name).map_err(|e| e.to_string())?;
+        payload.devices = repo::list_devices(&conn).map_err(|e| e.to_string())?;
+        payload.apps = repo::export_app_metadata(&conn).map_err(|e| e.to_string())?;
+        payload.categories = repo::export_categories(&conn).map_err(|e| e.to_string())?;
+        let mut built = Vec::new();
+        for year in &years {
+            let rows = repo::export_segments(&conn, *year).map_err(|e| e.to_string())?;
+            let temp = tempfile::NamedTempFile::new().map_err(|e| e.to_string())?;
+            let descriptor = package::build_year_package(
+                temp.path(),
+                &payload.sync_space_id,
+                &payload.generation_id,
+                *year,
+                &uuid::Uuid::new_v4().to_string(),
+                &rows,
+                &master,
+            )
+            .map_err(|e| e.to_string())?;
+            built.push((
+                *year,
+                std::fs::read(temp.path()).map_err(|e| e.to_string())?,
+                descriptor,
+            ));
+        }
+        built
+    };
+    for (year, bytes, descriptor) in packages {
+        client
+            .put(&format!("{year}.tracer-sync"), bytes, None, true)
+            .await
+            .map_err(|e| e.to_string())?;
+        payload.packages.push(descriptor);
+    }
+    payload.packages.sort_by_key(|v| v.year);
+    let manifest = package::replace_manifest_payload(&initial, &master, &payload)
+        .map_err(|e| e.to_string())?;
+    client
+        .put("manifest.tracer", manifest, None, true)
+        .await
+        .map_err(|e| e.to_string())?;
+    let stored = service::StoredSyncConfig::new(
+        input.endpoint,
+        input.directory,
+        input.username,
+        input.webdav_password,
+        &master,
+        concurrency,
+    )
+    .map_err(|e| e.to_string())?;
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    service::save_stored_config(&conn, &stored).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn rebuild_remote_year(
+    state: tauri::State<'_, DbState>,
+    manager: tauri::State<'_, SyncManager>,
+    year: i32,
+    confirmed: bool,
+) -> Result<(), String> {
+    if !confirmed {
+        return Err("重建远端年度包需要二次确认".into());
+    }
+    if manager.is_running().await {
+        return Err("同步进行中，不能重建".into());
+    }
+    let stored = {
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        service::load_stored_config(&conn).map_err(|e| e.to_string())?
+    }
+    .ok_or("尚未配置 WebDAV 同步")?;
+    let (client, master) = stored.client_and_master().map_err(|e| e.to_string())?;
+    manager.checkpoint().await.map_err(|e| e.to_string())?;
+    let remote = client
+        .get("manifest.tracer")
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or("远端控制文件不存在")?;
+    let mut payload =
+        package::open_manifest_with_master(&remote.bytes, &master).map_err(|e| e.to_string())?;
+    let rows = {
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        repo::export_segments(&conn, year).map_err(|e| e.to_string())?
+    };
+    let temp = tempfile::NamedTempFile::new().map_err(|e| e.to_string())?;
+    let descriptor = package::build_year_package(
+        temp.path(),
+        &payload.sync_space_id,
+        &payload.generation_id,
+        year,
+        &uuid::Uuid::new_v4().to_string(),
+        &rows,
+        &master,
+    )
+    .map_err(|e| e.to_string())?;
+    client
+        .put(
+            &format!("{year}.tracer-sync"),
+            std::fs::read(temp.path()).map_err(|e| e.to_string())?,
+            None,
+            false,
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    payload.packages.retain(|v| v.year != year);
+    payload.packages.push(descriptor);
+    payload.packages.sort_by_key(|v| v.year);
+    let manifest = package::replace_manifest_payload(&remote.bytes, &master, &payload)
+        .map_err(|e| e.to_string())?;
+    client
+        .put("manifest.tracer", manifest, remote.etag.as_deref(), false)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn restore_local_year(
+    state: tauri::State<'_, DbState>,
+    manager: tauri::State<'_, SyncManager>,
+    year: i32,
+    confirmed: bool,
+) -> Result<usize, String> {
+    if !confirmed {
+        return Err("从远端重建本地年度数据需要二次确认".into());
+    }
+    if manager.is_running().await {
+        return Err("同步进行中，不能恢复".into());
+    }
+    let stored = {
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        service::load_stored_config(&conn).map_err(|e| e.to_string())?
+    }
+    .ok_or("尚未配置 WebDAV 同步")?;
+    let (client, master) = stored.client_and_master().map_err(|e| e.to_string())?;
+    let manifest_file = client
+        .get("manifest.tracer")
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or("远端控制文件不存在")?;
+    let manifest = package::open_manifest_with_master(&manifest_file.bytes, &master)
+        .map_err(|e| e.to_string())?;
+    let descriptor = manifest
+        .packages
+        .iter()
+        .find(|v| v.year == year)
+        .ok_or("远端没有所选年份")?;
+    let package_file = client
+        .get(&format!("{year}.tracer-sync"))
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or("远端年度包不存在")?;
+    let temp = tempfile::NamedTempFile::new().map_err(|e| e.to_string())?;
+    std::fs::write(temp.path(), package_file.bytes).map_err(|e| e.to_string())?;
+    let records = package::open_year_package(
+        temp.path(),
+        descriptor,
+        &manifest.sync_space_id,
+        &manifest.generation_id,
+        &master,
+    )
+    .map_err(|e| e.to_string())?;
+    {
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        merge::apply_metadata(
+            &conn,
+            &manifest.devices,
+            &manifest.apps,
+            &manifest.categories,
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    manager
+        .replace_year(year, records)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn notify_frontend_ready(app: AppHandle) -> Result<(), String> {
     reveal_hidden_main_window(&app);
     Ok(())
@@ -501,44 +1099,60 @@ fn restore_and_monitor_window_size(app: &AppHandle, win: &tauri::WebviewWindow) 
                     "SELECT value FROM config WHERE key = 'window_size'",
                     [],
                     |r| r.get::<_, String>(0),
-                ).ok()
+                )
+                .ok()
             });
             if let Some(val) = cfg {
                 if let Some((a, b)) = val.split_once(',') {
                     let w = a.trim().parse().unwrap_or(960.0);
                     let h = b.trim().parse().unwrap_or(620.0);
-                    if w > 0.0 && h > 0.0 { (w, h) } else { (960.0, 620.0) }
-                } else { (960.0, 620.0) }
-            } else { (960.0, 620.0) }
+                    if w > 0.0 && h > 0.0 {
+                        (w, h)
+                    } else {
+                        (960.0, 620.0)
+                    }
+                } else {
+                    (960.0, 620.0)
+                }
+            } else {
+                (960.0, 620.0)
+            }
         };
         let _ = win.set_size(LogicalSize::new(sw, sh));
 
         // 还原位置（物理坐标）。
-        let pos: Option<(i32, i32)> = db::open(&db_path).ok().and_then(|c| {
-            c.query_row(
-                "SELECT value FROM config WHERE key = 'window_pos'",
-                [],
-                |r| r.get::<_, String>(0),
-            ).ok()
-        }).and_then(|val| {
-            let (a, b) = val.split_once(',')?;
-            Some((a.trim().parse().ok()?, b.trim().parse().ok()?))
-        });
+        let pos: Option<(i32, i32)> = db::open(&db_path)
+            .ok()
+            .and_then(|c| {
+                c.query_row(
+                    "SELECT value FROM config WHERE key = 'window_pos'",
+                    [],
+                    |r| r.get::<_, String>(0),
+                )
+                .ok()
+            })
+            .and_then(|val| {
+                let (a, b) = val.split_once(',')?;
+                Some((a.trim().parse().ok()?, b.trim().parse().ok()?))
+            });
         if let Some((x, y)) = pos.filter(|(x, y)| *x > -30000 && *y > -30000) {
             let _ = win.set_position(PhysicalPosition { x, y });
         }
 
         let app_clone = app.clone();
         let w_clone = win.clone();
-    win.on_window_event(move |event| {
-        match event {
+        win.on_window_event(move |event| match event {
             tauri::WindowEvent::CloseRequested { .. } => {
                 if let Ok(size) = w_clone.inner_size() {
                     if let Ok(factor) = w_clone.scale_factor() {
                         let logical = size.to_logical::<f64>(factor);
                         if let Some(state) = app_clone.try_state::<DbState>() {
                             if let Ok(conn) = state.conn.lock() {
-                                let _ = repo::set_config(&conn, "window_size", &format!("{},{}", logical.width, logical.height));
+                                let _ = repo::set_config(
+                                    &conn,
+                                    "window_size",
+                                    &format!("{},{}", logical.width, logical.height),
+                                );
                             }
                         }
                     }
@@ -549,7 +1163,8 @@ fn restore_and_monitor_window_size(app: &AppHandle, win: &tauri::WebviewWindow) 
                     }
                     if let Some(state) = app_clone.try_state::<DbState>() {
                         if let Ok(conn) = state.conn.lock() {
-                            let _ = repo::set_config(&conn, "window_pos", &format!("{},{}", p.x, p.y));
+                            let _ =
+                                repo::set_config(&conn, "window_pos", &format!("{},{}", p.x, p.y));
                         }
                     }
                 }
@@ -561,14 +1176,14 @@ fn restore_and_monitor_window_size(app: &AppHandle, win: &tauri::WebviewWindow) 
                     }
                     if let Some(state) = app_clone.try_state::<DbState>() {
                         if let Ok(conn) = state.conn.lock() {
-                            let _ = repo::set_config(&conn, "window_pos", &format!("{},{}", p.x, p.y));
+                            let _ =
+                                repo::set_config(&conn, "window_pos", &format!("{},{}", p.x, p.y));
                         }
                     }
                 }
             }
             _ => {}
-        }
-    });
+        });
     }
 }
 
@@ -599,10 +1214,16 @@ fn system_is_dark() -> bool {
 /// 用于在 WebView2 唤醒的初始几百毫秒内避免露出默认白底。
 fn theme_window_bg(app: &AppHandle) -> tauri::window::Color {
     let light = tauri::window::Color(240, 240, 236, 255);
-    let Some(state) = app.try_state::<DbState>() else { return light; };
-    let Ok(conn) = state.conn.lock() else { return light; };
+    let Some(state) = app.try_state::<DbState>() else {
+        return light;
+    };
+    let Ok(conn) = state.conn.lock() else {
+        return light;
+    };
     let theme: String = conn
-        .query_row("SELECT value FROM config WHERE key = 'theme'", [], |r| r.get(0))
+        .query_row("SELECT value FROM config WHERE key = 'theme'", [], |r| {
+            r.get(0)
+        })
         .unwrap_or_else(|_| "system".to_string());
     match theme.as_str() {
         "pure" => tauri::window::Color(255, 255, 255, 255),
@@ -702,10 +1323,23 @@ pub fn run() {
             update_app_display_name,
             notify_frontend_ready,
             check_for_update,
+            configure_sync,
+            get_sync_overview,
+            sync_now,
+            cancel_sync,
+            disconnect_sync,
+            rename_sync_device,
+            change_sync_password,
+            reset_sync_space,
+            force_reset_sync_space,
+            rebuild_remote_year,
+            restore_local_year,
         ])
         .setup(|app| {
             let display_name = installed_display_name();
-            app.manage(DisplayName { value: display_name });
+            app.manage(DisplayName {
+                value: display_name,
+            });
             if let Some(win) = app.get_webview_window("main") {
                 let _ = win.set_title(display_name);
             }
@@ -726,7 +1360,10 @@ pub fn run() {
             // 图标缓存目录。
             let icon_dir = data_dir.join("icons");
             std::fs::create_dir_all(&icon_dir)?;
-            app.manage(IconDir { path: icon_dir, cache: Mutex::new(HashMap::new()) });
+            app.manage(IconDir {
+                path: icon_dir,
+                cache: Mutex::new(HashMap::new()),
+            });
 
             // 读连接（供 Tauri 命令使用）。
             let read_conn = db::open(&db_path)?;
@@ -743,6 +1380,7 @@ pub fn run() {
             });
 
             core::owner::spawn(rx, write_conn, session_state, last_active);
+            app.manage(SyncManager::new(tx.clone(), db_path.clone()));
             core::tracker::spawn(tx.clone());
             core::power::spawn(tx);
 
@@ -758,8 +1396,20 @@ pub fn run() {
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "show" => show_main_window(app),
                     "quit" => {
-                        SHOULD_QUIT.store(true, std::sync::atomic::Ordering::SeqCst);
-                        app.exit(0);
+                        if let Some(manager) = app.try_state::<SyncManager>() {
+                            manager.cancel();
+                            let app = app.clone();
+                            tauri::async_runtime::spawn(async move {
+                                while app.state::<SyncManager>().is_running().await {
+                                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                                }
+                                SHOULD_QUIT.store(true, std::sync::atomic::Ordering::SeqCst);
+                                app.exit(0);
+                            });
+                        } else {
+                            SHOULD_QUIT.store(true, std::sync::atomic::Ordering::SeqCst);
+                            app.exit(0);
+                        }
                     }
                     _ => {}
                 })
@@ -780,11 +1430,13 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|_handle, event| {
-        if let tauri::RunEvent::ExitRequested { api, .. } = event {
-            if !SHOULD_QUIT.load(std::sync::atomic::Ordering::SeqCst) {
-                api.prevent_exit();
+        .run(|handle, event| {
+            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                if !SHOULD_QUIT.load(std::sync::atomic::Ordering::SeqCst) {
+                    api.prevent_exit();
+                } else if let Some(manager) = handle.try_state::<SyncManager>() {
+                    manager.cancel();
+                }
             }
-        }
-    });
+        });
 }

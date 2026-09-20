@@ -11,7 +11,7 @@ export function buildHeatOption(data: number[]): Record<string, unknown> {
     grid: { left: 24, right: 4, top: 4, bottom: 20 },
     xAxis: {
       type: 'category', data: hours,
-      axisLabel: { fontSize: 8, color: '#9A92C8', interval: 2 },
+      axisLabel: { fontSize: 10, color: '#9A92C8', interval: 2 },
       axisLine: { show: false }, axisTick: { show: false },
     },
     yAxis: { show: false },
@@ -51,7 +51,7 @@ export function buildRingOption(items: AppRankItem[]): Record<string, unknown> {
       style: { text: `${items.length}`, fill: '#5048E5', font: '600 20px "Segoe UI Variable Display", "Segoe UI", sans-serif', textAlign: 'center' },
     }, {
       type: 'text', left: 'center', top: '56%',
-      style: { text: '应用', fill: '#9A92C8', font: '400 8px "Segoe UI", sans-serif', textAlign: 'center' },
+      style: { text: '应用', fill: '#9A92C8', font: '400 10px "Segoe UI", sans-serif', textAlign: 'center' },
     }],
   };
 }
@@ -60,10 +60,10 @@ export function buildRingOption(items: AppRankItem[]): Record<string, unknown> {
 export function buildBarOption(data: [string, number[]][], labels: string[]): Record<string, unknown> {
   return {
     tooltip: { trigger: 'axis' },
-    legend: { show: data.length > 1, top: 0, itemWidth: 8, itemHeight: 8, textStyle: { fontSize: 9, color: '#6A62A0' } },
+    legend: { show: data.length > 1, top: 0, itemWidth: 8, itemHeight: 8, textStyle: { fontSize: 10, color: '#6A62A0' } },
     grid: { left: 36, right: 8, top: data.length > 1 ? 28 : 8, bottom: 20 },
-    xAxis: { type: 'category', data: labels, axisLabel: { fontSize: 8, color: '#9A92C8' }, axisLine: { show: false }, axisTick: { show: false } },
-    yAxis: { type: 'value', splitLine: { lineStyle: { color: '#F0ECF8' } }, axisLabel: { fontSize: 8, color: '#9A92C8' } },
+    xAxis: { type: 'category', data: labels, axisLabel: { fontSize: 10, color: '#9A92C8' }, axisLine: { show: false }, axisTick: { show: false } },
+    yAxis: { type: 'value', splitLine: { lineStyle: { color: '#F0ECF8' } }, axisLabel: { fontSize: 10, color: '#9A92C8' } },
     series: data.length > 0
       ? data.map(([name, vals], i) => {
           const isOther = name === '其他';
@@ -129,7 +129,7 @@ export function buildPieOption(slices: PieSlice[]): Record<string, unknown> {
       type: 'pie', radius: ['40%', '65%'], center: ['50%', '45%'],
       data: slices.map(s => ({ name: s.name, value: s.value, itemStyle: { color: s.color ?? '#9A92C8' } })),
       label: { show: false },
-      emphasis: { label: { show: true, fontSize: 9, fontWeight: 'bold' } },
+      emphasis: { label: { show: true, fontSize: 10, fontWeight: 'bold' } },
     }],
     graphic: [{
       type: 'text', left: 'center', top: '38%',

@@ -11,5 +11,6 @@ pub mod owner;
 pub mod power;
 pub mod process;
 pub mod repo;
+pub mod sync;
 pub mod tracker;
 pub mod types;

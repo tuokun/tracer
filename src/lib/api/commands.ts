@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type {
   TodaySummary, CurrentSession, AppRankItem, AppItem,
   CategoryItem, RadarPoint, PieSlice, StatsSummary,
+  SyncOverview, SyncRunResult, SyncSetupInput, SyncSetupResult,
 } from './types';
 
 export async function getTodaySummary(): Promise<TodaySummary> {
@@ -20,8 +21,8 @@ export async function getCurrentSession(): Promise<CurrentSession | null> {
   }
 }
 
-export async function getAppRank(start: number, end: number, limit?: number): Promise<AppRankItem[]> {
-  return invoke('get_app_rank', { start, end, limit: limit ?? 10 });
+export async function getAppRank(start: number, end: number, limit?: number, deviceId?: string): Promise<AppRankItem[]> {
+  return invoke('get_app_rank', { start, end, limit: limit ?? 10, deviceId });
 }
 
 export async function getHourlyHeatmap(date: number): Promise<number[]> {
@@ -64,20 +65,20 @@ export async function applyCategoryRules(): Promise<number> {
   return invoke('apply_category_rules');
 }
 
-export async function getStatsRange(granularity: string, start: number, end: number, limit?: number): Promise<[string, number[]][]> {
-  return invoke('get_stats_range', { granularity, start, end, limit: limit ?? 5 });
+export async function getStatsRange(granularity: string, start: number, end: number, limit?: number, deviceId?: string): Promise<[string, number[]][]> {
+  return invoke('get_stats_range', { granularity, start, end, limit: limit ?? 5, deviceId });
 }
 
-export async function getStatsRadar(start: number, end: number): Promise<RadarPoint[]> {
-  return invoke('get_stats_radar', { start, end });
+export async function getStatsRadar(start: number, end: number, deviceId?: string): Promise<RadarPoint[]> {
+  return invoke('get_stats_radar', { start, end, deviceId });
 }
 
-export async function getStatsPie(start: number, end: number): Promise<PieSlice[]> {
-  return invoke('get_stats_pie', { start, end });
+export async function getStatsPie(start: number, end: number, deviceId?: string): Promise<PieSlice[]> {
+  return invoke('get_stats_pie', { start, end, deviceId });
 }
 
-export async function getStatsSummary(start: number, end: number): Promise<StatsSummary> {
-  return invoke('get_stats_summary', { start, end });
+export async function getStatsSummary(start: number, end: number, deviceId?: string): Promise<StatsSummary> {
+  return invoke('get_stats_summary', { start, end, deviceId });
 }
 
 export async function setConfigValue(key: string, value: string): Promise<void> {
@@ -132,3 +133,15 @@ export interface UpdateCheckResult {
 export async function checkForUpdate(): Promise<UpdateCheckResult> {
   return invoke('check_for_update');
 }
+
+export async function configureSync(input: SyncSetupInput): Promise<SyncSetupResult> { return invoke('configure_sync', { input }); }
+export async function getSyncOverview(): Promise<SyncOverview> { return invoke('get_sync_overview'); }
+export async function syncNow(year: number): Promise<SyncRunResult> { return invoke('sync_now', { year }); }
+export async function cancelSync(): Promise<void> { return invoke('cancel_sync'); }
+export async function disconnectSync(): Promise<void> { return invoke('disconnect_sync'); }
+export async function renameSyncDevice(name: string): Promise<void> { return invoke('rename_sync_device', { name }); }
+export async function changeSyncPassword(oldPassword: string | null, newPassword: string, newPasswordConfirm: string): Promise<void> { return invoke('change_sync_password', { oldPassword, newPassword, newPasswordConfirm }); }
+export async function resetSyncSpace(newPassword: string, newPasswordConfirm: string, years: number[], confirmed: boolean): Promise<void> { return invoke('reset_sync_space', { newPassword, newPasswordConfirm, years, confirmed }); }
+export async function forceResetSyncSpace(input: SyncSetupInput, years: number[], confirmed: boolean): Promise<void> { return invoke('force_reset_sync_space', { input, years, confirmed }); }
+export async function rebuildRemoteYear(year: number, confirmed: boolean): Promise<void> { return invoke('rebuild_remote_year', { year, confirmed }); }
+export async function restoreLocalYear(year: number, confirmed: boolean): Promise<number> { return invoke('restore_local_year', { year, confirmed }); }

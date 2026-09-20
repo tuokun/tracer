@@ -78,7 +78,7 @@
 
   {#if cats.length === 0 && !showForm}
     <div class="empty-state">
-      <span style="font-family:'Segoe UI',sans-serif;font-size:0.5rem;color:#9A92C8">暂无分类，点击右上角新建</span>
+      <span style="font-family:'Segoe UI',sans-serif;font-size:var(--font-size-body);color:#9A92C8">暂无分类，点击右上角新建</span>
     </div>
   {:else}
     <div class="cat-grid">
@@ -125,14 +125,14 @@
   .page-title {
     font-family: 'Segoe UI Variable Display', 'Segoe UI', sans-serif;
     font-weight: 600;
-    font-size: 0.85rem;
+    font-size: var(--font-size-page-title);
     color: theme('colors.text.primary');
     margin: 0;
   }
 
   .page-desc {
     font-family: 'Segoe UI', sans-serif;
-    font-size: 0.5rem;
+    font-size: var(--font-size-body);
     color: theme('colors.text.secondary');
     margin-top: 0.125rem;
   }
@@ -144,7 +144,7 @@
     color: #FFFFFF;
     border: none;
     font-family: 'Segoe UI', sans-serif;
-    font-size: 0.5rem;
+    font-size: var(--font-size-body);
     font-weight: 600;
     cursor: pointer;
   }
@@ -157,7 +157,7 @@
 
   .form-label {
     font-family: 'Segoe UI', sans-serif;
-    font-size: 0.5rem;
+    font-size: var(--font-size-body);
     font-weight: 600;
     color: theme('colors.text.primary');
     width: 40px;
@@ -170,7 +170,7 @@
     border-radius: 4px;
     border: 1px solid theme('colors.border');
     font-family: 'Segoe UI', sans-serif;
-    font-size: 0.5rem;
+    font-size: var(--font-size-body);
     color: theme('colors.text.primary');
     outline: none;
   }
@@ -201,7 +201,7 @@
     background: #FFFFFF;
     color: theme('colors.text.secondary');
     font-family: 'Segoe UI', sans-serif;
-    font-size: 0.5rem;
+    font-size: var(--font-size-body);
     cursor: pointer;
   }
 
@@ -212,7 +212,7 @@
     background: theme('colors.primary.DEFAULT');
     color: #FFFFFF;
     font-family: 'Segoe UI', sans-serif;
-    font-size: 0.5rem;
+    font-size: var(--font-size-body);
     font-weight: 600;
     cursor: pointer;
   }
@@ -272,7 +272,7 @@
   .cat-name {
     font-family: 'Segoe UI Variable Display', 'Segoe UI', sans-serif;
     font-weight: 600;
-    font-size: 0.8rem;
+    font-size: var(--font-size-section-title);
     color: theme('colors.text.primary');
   }
 
@@ -280,7 +280,7 @@
 
   .cat-rules-label {
     font-family: 'Segoe UI', sans-serif;
-    font-size: 0.62rem;
+    font-size: var(--font-size-body);
     color: theme('colors.text.tertiary');
     margin-bottom: 3px;
   }
@@ -289,7 +289,7 @@
   .cat-rules {
     display: inline-block;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 0.62rem;
+    font-size: var(--font-size-body);
     font-weight: 600;
     color: var(--cat-color, #5048E5);
     background: color-mix(in srgb, var(--cat-color, #5048E5) 7%, transparent);
@@ -302,7 +302,7 @@
   .cat-manual-badge {
     display: inline-block;
     font-family: 'Segoe UI', sans-serif;
-    font-size: 0.62rem;
+    font-size: var(--font-size-body);
     color: theme('colors.text.tertiary');
     background: #FAF9FD;
     padding: 0.08rem 0.3rem;
@@ -324,7 +324,7 @@
     border: none;
     background: none;
     font-family: 'Segoe UI', sans-serif;
-    font-size: 0.6rem;
+    font-size: var(--font-size-body);
     font-weight: 600;
     color: color-mix(in srgb, var(--cat-color, #5048E5) 70%, #666);
     cursor: pointer;

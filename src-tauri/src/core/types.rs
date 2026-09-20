@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct TodaySummary {
@@ -40,6 +40,9 @@ pub struct AppItem {
     pub category_color: Option<String>,
     pub last_used_date: Option<i64>,
     pub is_ignored: bool,
+    pub origin_device_id: String,
+    pub device_name: String,
+    pub is_current_device: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -70,4 +73,56 @@ pub struct StatsSummary {
     pub most_active_category: Option<String>,
     pub most_active_app: Option<String>,
     pub daily_average: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SyncSetupInput {
+    pub endpoint: String,
+    pub username: String,
+    pub webdav_password: String,
+    pub directory: Option<String>,
+    pub sync_password: String,
+    pub sync_password_confirm: String,
+    pub device_name: String,
+    pub allow_insecure_http: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SyncSetupResult {
+    pub joined_existing: bool,
+    pub insecure_http: bool,
+    pub concurrency_mode: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DeviceItem {
+    pub device_id: String,
+    pub display_name: String,
+    pub is_current: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SyncHistoryItem {
+    pub created_at: i64,
+    pub year: i32,
+    pub success: bool,
+    pub uploaded_bytes: i64,
+    pub downloaded_bytes: i64,
+    pub imported_segments: i64,
+    pub duration_ms: i64,
+    pub error_summary: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SyncOverview {
+    pub configured: bool,
+    pub insecure_http: bool,
+    pub concurrency_mode: Option<String>,
+    pub current_device_id: String,
+    pub current_device_name: String,
+    pub devices: Vec<DeviceItem>,
+    pub years: Vec<i32>,
+    pub last_success_at: Option<i64>,
+    pub history: Vec<SyncHistoryItem>,
+    pub status: crate::core::sync::service::SyncStatus,
 }

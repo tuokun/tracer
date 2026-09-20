@@ -142,6 +142,22 @@ pub fn spawn(
                         current = None; // 唤醒后等下一次前台切换重建段
                         info!("系统恢复（恢复计时）");
                     }
+                    Some(Event::SyncCheckpoint { ack }) => {
+                        let result = if let Some(seg) = current.as_mut() {
+                            let now = now_unix();
+                            let duration = now - seg.start;
+                            let result = if duration > 0 { repo::add_duration(&conn, seg.app_id, seg.start, duration) } else { Ok(()) };
+                            if result.is_ok() { seg.start = now; }
+                            result
+                        } else { Ok(()) };
+                        let _ = ack.send(result);
+                    }
+                    Some(Event::SyncImport { records, ack }) => {
+                        let _ = ack.send(repo::import_segments(&conn, &records));
+                    }
+                    Some(Event::SyncReplaceYear { year, records, ack }) => {
+                        let _ = ack.send(repo::replace_year(&conn, year, &records));
+                    }
                     None => break,
                 }
             }

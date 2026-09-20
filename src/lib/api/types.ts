@@ -34,6 +34,9 @@ export interface AppItem {
   category_color: string | null;
   last_used_date: number | null;
   is_ignored: boolean;
+  origin_device_id: string;
+  device_name: string;
+  is_current_device: boolean;
 }
 
 export interface CategoryItem {
@@ -61,3 +64,12 @@ export interface StatsSummary {
   most_active_app: string | null;
   daily_average: number;
 }
+
+export type SyncPhase = 'idle' | 'checkpoint' | 'download' | 'decrypt' | 'merge' | 'upload' | 'complete' | 'failed' | 'cancelled';
+export interface SyncStatus { running: boolean; phase: SyncPhase; year: number | null; message: string | null; }
+export interface DeviceItem { device_id: string; display_name: string; is_current: boolean; }
+export interface SyncHistoryItem { created_at: number; year: number; success: boolean; uploaded_bytes: number; downloaded_bytes: number; imported_segments: number; duration_ms: number; error_summary: string | null; }
+export interface SyncOverview { configured: boolean; insecure_http: boolean; concurrency_mode: string | null; current_device_id: string; current_device_name: string; devices: DeviceItem[]; years: number[]; last_success_at: number | null; history: SyncHistoryItem[]; status: SyncStatus; }
+export interface SyncSetupInput { endpoint: string; username: string; webdav_password: string; directory: string | null; sync_password: string; sync_password_confirm: string; device_name: string; allow_insecure_http: boolean; }
+export interface SyncSetupResult { joined_existing: boolean; insecure_http: boolean; concurrency_mode: string; }
+export interface SyncRunResult { imported_segments: number; downloaded_bytes: number; uploaded_bytes: number; duration_ms: number; }

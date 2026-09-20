@@ -2,13 +2,13 @@
   import { onMount } from 'svelte';
   import Chart from '$lib/components/Chart.svelte';
   import {
-    getStatsRange, getStatsRadar, getStatsPie, getAppRank, getAppIcon
+    getStatsRange, getStatsRadar, getStatsPie, getAppRank, getAppIcon, getSyncOverview
   } from '$lib/api/commands';
   import { formatDuration, todayTimestamp, rangeForPeriod, shiftCursorForPeriod } from '$lib/utils/time';
   import { appDisplayName } from '$lib/utils/format';
   import { CATEGORY_COLORS } from '$lib/utils/colors';
   import { buildBarOption, buildRadarOption, buildPieOption } from '$lib/charts/options';
-  import type { RadarPoint, PieSlice, AppRankItem } from '$lib/api/types';
+  import type { RadarPoint, PieSlice, AppRankItem, DeviceItem } from '$lib/api/types';
 
   type Granularity = 'day' | 'week' | 'month' | 'year';
 
@@ -22,12 +22,17 @@
   let pieSlices = $state<PieSlice[]>([]);
   let topApps = $state<AppRankItem[]>([]);
   let iconCache = $state(new Map<string, string>());
+  let devices = $state<DeviceItem[]>([]);
+  let selectedDevice = $state('');
 
   let barOptions = $derived(buildBarOption(barData, barLabels));
   let radarOptions = $derived(buildRadarOption(radarPoints));
   let pieOptions = $derived(buildPieOption(pieSlices));
 
-  onMount(() => loadData());
+  onMount(async () => {
+    try { devices = (await getSyncOverview()).devices; } catch { devices = []; }
+    await loadData();
+  });
 
   function buildLabels(g: string, startTs: number, endTs: number): string[] {
     if (g === 'day') return Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
@@ -43,10 +48,10 @@
     const { start, end } = rangeForPeriod(granularity, cursorTs);
     barLabels = buildLabels(granularity, start, end);
     [barData, radarPoints, pieSlices, topApps] = await Promise.all([
-      getStatsRange(granularity, start, end, 5),
-      getStatsRadar(start, end),
-      getStatsPie(start, end),
-      getAppRank(start, end, 5),
+      getStatsRange(granularity, start, end, 5, selectedDevice || undefined),
+      getStatsRadar(start, end, selectedDevice || undefined),
+      getStatsPie(start, end, selectedDevice || undefined),
+      getAppRank(start, end, 5, selectedDevice || undefined),
     ]);
     await loadRankIcons();
   }
@@ -93,6 +98,12 @@
 <div class="page">
   <div class="page-header">
     <h1 class="page-title">统计分析</h1>
+    <select class="device-select" bind:value={selectedDevice} onchange={loadData} aria-label="设备筛选">
+      <option value="">全部设备</option>
+      {#each devices as device}
+        <option value={device.device_id}>{device.display_name}{device.is_current ? '（本机）' : ''}</option>
+      {/each}
+    </select>
   </div>
 
   <div class="time-selector">
@@ -181,12 +192,13 @@
 <style>
   .page { max-width: 1000px; }
 
-  .page-header { margin-bottom: 1rem; }
+  .page-header { margin-bottom: 1rem; display: flex; align-items: center; justify-content: space-between; }
+  .device-select { font-family: 'Segoe UI', sans-serif; font-size: var(--font-size-body); color: theme('colors.text.primary'); background: theme('colors.surface'); border: 1px solid theme('colors.border'); border-radius: 5px; padding: 0.25rem 0.5rem; outline: none; }
 
   .page-title {
     font-family: 'Segoe UI Variable Display', 'Segoe UI', sans-serif;
     font-weight: 600;
-    font-size: 0.85rem;
+    font-size: var(--font-size-page-title);
     color: theme('colors.text.primary');
     margin: 0;
   }
@@ -202,7 +214,7 @@
 
   .gran-btn {
     font-family: 'Segoe UI', sans-serif;
-    font-size: 0.5rem;
+    font-size: var(--font-size-body);
     color: theme('colors.text.secondary');
     padding: 0.25rem 0.75rem;
     border-radius: 4px;
@@ -218,7 +230,7 @@
 
   .nav-btn {
     font-family: 'Segoe UI', sans-serif;
-    font-size: 0.5rem;
+    font-size: var(--font-size-body);
     color: theme('colors.text.secondary');
     padding: 0.25rem 0.5rem;
     border-radius: 4px;
@@ -231,7 +243,7 @@
 
   .time-label {
     font-family: 'Segoe UI', sans-serif;
-    font-size: 0.5rem;
+    font-size: var(--font-size-body);
     color: theme('colors.text.primary');
     min-width: 7em;
     text-align: center;
@@ -244,7 +256,7 @@
   .mt-2 { margin-top: 0.5rem; }
   .pt-2 { padding-top: 0.5rem; }
 
-  .panel-title { font-family: 'Segoe UI Variable Display', 'Segoe UI', sans-serif; font-weight: 600; font-size: 0.5rem; color: theme('colors.text.primary'); }
+  .panel-title { font-family: 'Segoe UI Variable Display', 'Segoe UI', sans-serif; font-weight: 600; font-size: var(--font-size-body); color: theme('colors.text.primary'); }
 
   /* 顶部切换排版与 Segmented 切换控件 */
   .panel-header-row {
@@ -264,7 +276,7 @@
 
   .switch-btn {
     font-family: 'Segoe UI', sans-serif;
-    font-size: 0.42rem;
+    font-size: var(--font-size-body);
     font-weight: 500;
     color: theme('colors.text.secondary');
     padding: 0.15rem 0.5rem;
@@ -297,7 +309,7 @@
 
   .text-empty-center {
     font-family: 'Segoe UI', sans-serif;
-    font-size: 0.5rem;
+    font-size: var(--font-size-body);
     color: theme('colors.text.tertiary');
     text-align: center;
     padding: 0.5rem 0;
@@ -310,7 +322,7 @@
 
   .rank-num {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 0.5rem;
+    font-size: var(--font-size-body);
     font-weight: 700;
     color: theme('colors.text.secondary');
     width: 10px;
@@ -322,14 +334,14 @@
   .rank-item:nth-child(3) .rank-num { color: theme('colors.text.primary'); }
 
   .rank-icon-img { width: 20px; height: 20px; border-radius: 3px; flex-shrink: 0; }
-  .rank-icon-placeholder { display: inline-flex; align-items: center; justify-content: center; background: theme('colors.border'); font-size: 0.4rem; color: theme('colors.text.tertiary'); }
+  .rank-icon-placeholder { display: inline-flex; align-items: center; justify-content: center; background: theme('colors.border'); font-size: var(--font-size-caption); color: theme('colors.text.tertiary'); }
 
   /* 移除 max-width 并使用 flex: 1 撑满剩余宽度，使时间文字靠最右对齐 */
   .rank-info { flex: 1; display: flex; flex-direction: column; gap: 0.125rem; min-width: 0; }
 
   .rank-name {
     font-family: 'Segoe UI', sans-serif;
-    font-size: 0.5rem;
+    font-size: var(--font-size-body);
     font-weight: 600;
     color: theme('colors.text.primary');
     overflow: hidden;
@@ -342,7 +354,7 @@
 
   .rank-time {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 0.5rem;
+    font-size: var(--font-size-body);
     font-weight: 600;
     color: theme('colors.text.primary');
     flex-shrink: 0;
@@ -357,13 +369,13 @@
 
   .summary-val {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 0.5rem;
+    font-size: var(--font-size-body);
     color: theme('colors.text.primary');
   }
 
   .summary-lbl {
     font-family: 'Segoe UI', sans-serif;
-    font-size: 0.4rem;
+    font-size: var(--font-size-caption);
     color: theme('colors.text.tertiary');
   }
 
@@ -385,7 +397,7 @@
 
   .pie-legend-name {
     font-family: 'Segoe UI', sans-serif;
-    font-size: 0.65rem;
+    font-size: var(--font-size-body);
     color: theme('colors.text.secondary');
   }
 </style>

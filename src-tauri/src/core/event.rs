@@ -5,7 +5,9 @@
 use std::cell::RefCell;
 
 use crate::core::process::ProcessInfo;
+use crate::core::repo::SegmentRecord;
 use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::oneshot;
 
 #[derive(Debug)]
 pub enum Event {
@@ -18,7 +20,21 @@ pub enum Event {
     PowerSuspend,
     /// 系统自动唤醒（`PBT_APMRESUMEAUTOMATIC`）。
     PowerResume,
-    // 阶段二扩展：FlushTick
+    /// 同步前结算当前有效片段，并从当前时刻继续计时。
+    SyncCheckpoint {
+        ack: oneshot::Sender<rusqlite::Result<()>>,
+    },
+    /// 同步任务按批提交远端事实；owner 仍是追踪事实唯一写者。
+    SyncImport {
+        records: Vec<SegmentRecord>,
+        ack: oneshot::Sender<rusqlite::Result<usize>>,
+    },
+    /// 显式恢复操作：以远端事实替换本地所选年份并重建派生统计。
+    SyncReplaceYear {
+        year: i32,
+        records: Vec<SegmentRecord>,
+        ack: oneshot::Sender<rusqlite::Result<usize>>,
+    },
 }
 
 thread_local! {

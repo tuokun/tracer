@@ -33,7 +33,8 @@
     executablePath: string | null;
     hasCustomIcon: boolean;
     isIgnored: boolean;
-  }>({ show: false, x: 0, y: 0, appId: 0, appName: '', processName: '', executablePath: null, hasCustomIcon: false, isIgnored: false });
+    isCurrentDevice: boolean;
+  }>({ show: false, x: 0, y: 0, appId: 0, appName: '', processName: '', executablePath: null, hasCustomIcon: false, isIgnored: false, isCurrentDevice: true });
 
   // 二级子菜单（指派分类）是否展开
   let showSubmenu = $state(false);
@@ -119,6 +120,7 @@
   function showContextMenu(e: MouseEvent, app: AppItem) {
     e.preventDefault();
     e.stopPropagation();
+    if (!app.is_current_device) return;
     contextMenu = {
       show: true,
       x: e.clientX,
@@ -129,6 +131,7 @@
       executablePath: app.executable_path,
       hasCustomIcon: Boolean(app.icon_path),
       isIgnored: app.is_ignored,
+      isCurrentDevice: app.is_current_device,
     };
   }
 
@@ -304,7 +307,7 @@
     </div>
     {#if apps.length === 0}
       <div class="table-empty">
-        <span style="font-family:'Segoe UI',sans-serif;font-size:0.5rem;color:#9A92C8">暂无数据</span>
+        <span style="font-family:'Segoe UI',sans-serif;font-size:var(--font-size-body);color:#9A92C8">暂无数据</span>
       </div>
     {:else}
       {#each apps as app}
@@ -317,7 +320,7 @@
               <span class="app-icon-placeholder">{app.process_name[0].toUpperCase()}</span>
             {/if}
           </span>
-          <span class="col-name">{appDisplayName(app.display_name, app.process_name)}</span>
+          <span class="col-name">{appDisplayName(app.display_name, app.process_name)}{#if !app.is_current_device}<small class="device-tag">{app.device_name}</small>{/if}</span>
           <span class="col-path">{app.executable_path ?? '-'}</span>
           <span class="col-total">{formatDuration(app.total_seconds)}</span>
           <span class="col-category">
@@ -461,8 +464,8 @@
     gap: 0.1rem;
   }
 
-  .page-title { font-family: 'Segoe UI Variable Display','Segoe UI',sans-serif; font-weight: 600; font-size: 0.85rem; color: theme('colors.text.primary'); margin: 0; }
-  .page-desc { font-family: 'Segoe UI',sans-serif; font-size: 0.45rem; color: theme('colors.text.tertiary'); margin: 0; }
+  .page-title { font-family: 'Segoe UI Variable Display','Segoe UI',sans-serif; font-weight: 600; font-size: var(--font-size-page-title); color: theme('colors.text.primary'); margin: 0; }
+  .page-desc { font-family: 'Segoe UI',sans-serif; font-size: var(--font-size-body); color: theme('colors.text.tertiary'); margin: 0; }
 
   .header-controls {
     display: flex;
@@ -482,7 +485,7 @@
 
   .period-switcher button {
     font-family: 'Segoe UI', sans-serif;
-    font-size: 0.52rem;
+    font-size: var(--font-size-body);
     font-weight: 600;
     color: theme('colors.text.secondary');
     border: none;
@@ -542,7 +545,7 @@
 
   .date-label-mini {
     font-family: 'Segoe UI', sans-serif;
-    font-size: 0.5rem;
+    font-size: var(--font-size-body);
     font-weight: 700;
     color: theme('colors.text.primary');
     min-width: 95px;
@@ -582,7 +585,7 @@
     border: 1px solid #ECE9F5;
     background: #FAF9FD;
     font-family: 'Segoe UI', sans-serif;
-    font-size: 0.48rem;
+    font-size: var(--font-size-body);
     font-weight: 500;
     color: theme('colors.text.primary');
     outline: none;
@@ -620,7 +623,7 @@
     border: 1px solid #ECE9F5;
     background: #FAF9FD;
     font-family: 'Segoe UI', sans-serif;
-    font-size: 0.48rem;
+    font-size: var(--font-size-body);
     font-weight: 600;
     color: theme('colors.text.secondary');
     outline: none;
@@ -669,7 +672,7 @@
     padding: 0.5rem 0.75rem;
     border-bottom: 1px solid theme('colors.border');
     font-family: 'Segoe UI', sans-serif;
-    font-size: 0.5rem;
+    font-size: var(--font-size-body);
     font-weight: 600;
     color: theme('colors.text.secondary');
   }
@@ -681,20 +684,21 @@
     padding: 0.5rem 0.75rem;
     border-bottom: 1px solid theme('colors.heatmap.bg');
     font-family: 'Segoe UI', sans-serif;
-    font-size: 0.5rem;
+    font-size: var(--font-size-body);
     color: theme('colors.text.primary');
   }
 
   .table-row:last-child { border-bottom: none; }
 
   .ignored-row { opacity: 0.55; }
+  .device-tag { display:block; color:theme('colors.text.tertiary'); font-size:var(--font-size-caption); font-weight:500; }
 
   .ignored-filter {
     display: flex;
     align-items: center;
     gap: 0.25rem;
     font-family: 'Segoe UI', sans-serif;
-    font-size: 0.45rem;
+    font-size: var(--font-size-body);
     color: theme('colors.text.secondary');
     cursor: pointer;
     white-space: nowrap;
@@ -704,16 +708,16 @@
 
   .col-icon { width: 28px; }
   .col-icon img, .app-icon-placeholder { width: 20px; height: 20px; border-radius: 3px; vertical-align: middle; }
-  .app-icon-placeholder { display: inline-flex; align-items: center; justify-content: center; background: theme('colors.border'); font-size: 0.4rem; color: theme('colors.text.tertiary'); }
+  .app-icon-placeholder { display: inline-flex; align-items: center; justify-content: center; background: theme('colors.border'); font-size: var(--font-size-caption); color: theme('colors.text.tertiary'); }
 
   .col-name { flex: 2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .col-path { flex: 3; font-size: 0.4rem; color: theme('colors.text.secondary'); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .col-total { width: 60px; text-align: right; font-family: 'JetBrains Mono', monospace; font-size: 0.5rem; }
+  .col-path { flex: 3; font-size: var(--font-size-caption); color: theme('colors.text.secondary'); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .col-total { width: 60px; text-align: right; font-family: 'JetBrains Mono', monospace; font-size: var(--font-size-body); }
   .col-category { width: 75px; text-align: center; }
 
   .cat-pill {
     font-family: 'Segoe UI', sans-serif;
-    font-size: 0.4rem;
+    font-size: var(--font-size-caption);
     font-weight: 600;
     border-radius: 4px;
     padding: 0.02rem 0.25rem;
@@ -743,7 +747,7 @@
 
   .menu-header {
     font-family: 'Segoe UI', sans-serif;
-    font-size: 0.45rem;
+    font-size: var(--font-size-body);
     font-weight: 700;
     color: #000000;
     padding: 0.25rem 0.5rem;
@@ -815,7 +819,7 @@
 
   .menu-item-text {
     font-family: 'Segoe UI', sans-serif;
-    font-size: 0.45rem;
+    font-size: var(--font-size-body);
     font-weight: 600;
     color: #000000;
     transition: transform 0.2s;
@@ -935,7 +939,7 @@
 
   .modal-title {
     font-family: 'Segoe UI Variable Display', 'Segoe UI', sans-serif;
-    font-size: 0.75rem;
+    font-size: var(--font-size-dialog-title);
     font-weight: 600;
     color: theme('colors.text.primary');
     margin: 0;
@@ -963,7 +967,7 @@
 
   .modal-desc {
     font-family: 'Segoe UI', sans-serif;
-    font-size: 0.55rem;
+    font-size: var(--font-size-body);
     color: theme('colors.text.secondary');
     margin: 0;
     line-height: 1.4;
@@ -975,14 +979,14 @@
     color: theme('colors.primary.DEFAULT');
     padding: 1px 4px;
     border-radius: 3px;
-    font-size: 0.5rem;
+    font-size: var(--font-size-caption);
   }
 
   .modal-input {
     width: 100%;
     box-sizing: border-box;
     padding: 0.375rem 0.5rem;
-    font-size: 0.6rem;
+    font-size: var(--font-size-body);
     font-family: 'Segoe UI', sans-serif;
     color: theme('colors.text.primary');
     border: 1px solid theme('colors.border');
@@ -1003,7 +1007,7 @@
   .modal-btn {
     padding: 0.375rem 0.75rem;
     border-radius: 4px;
-    font-size: 0.55rem;
+    font-size: var(--font-size-body);
     font-weight: 600;
     cursor: pointer;
     font-family: 'Segoe UI', sans-serif;

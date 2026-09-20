@@ -14,7 +14,101 @@ const MIGRATIONS: &[(u32, &str)] = &[
     (1, MIGRATION_V1),
     (2, MIGRATION_V2),
     (3, MIGRATION_V3),
+    (4, MIGRATION_V4),
 ];
+
+// 多端同步采用新的事实模型。按产品决策不迁移旧使用数据，直接重建相关表。
+const MIGRATION_V4: &str = r#"
+DROP TABLE IF EXISTS hours_log;
+DROP TABLE IF EXISTS daily_log;
+DROP TABLE IF EXISTS usage_segments;
+DROP TABLE IF EXISTS apps;
+DROP TABLE IF EXISTS categories;
+DROP TABLE IF EXISTS devices;
+DROP TABLE IF EXISTS sync_history;
+
+CREATE TABLE devices (
+    device_id TEXT PRIMARY KEY,
+    display_name TEXT NOT NULL,
+    metadata_revision INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE categories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sync_id TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    color TEXT,
+    rules TEXT,
+    logical_revision INTEGER NOT NULL DEFAULT 0,
+    revision_device_id TEXT NOT NULL DEFAULT '',
+    is_deleted INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE apps (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    origin_device_id TEXT NOT NULL,
+    origin_app_id INTEGER NOT NULL,
+    process_name TEXT NOT NULL COLLATE NOCASE,
+    system_display_name TEXT,
+    custom_alias TEXT,
+    executable_path TEXT,
+    category_id INTEGER NOT NULL DEFAULT 0,
+    icon_path TEXT,
+    total_time INTEGER NOT NULL DEFAULT 0,
+    is_ignored INTEGER NOT NULL DEFAULT 0,
+    custom_icon_path TEXT,
+    metadata_revision INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(origin_device_id, origin_app_id),
+    UNIQUE(origin_device_id, process_name),
+    FOREIGN KEY(origin_device_id) REFERENCES devices(device_id)
+);
+CREATE INDEX idx_apps_process ON apps(process_name);
+CREATE INDEX idx_apps_origin ON apps(origin_device_id, origin_app_id);
+
+CREATE TABLE usage_segments (
+    origin_device_id TEXT NOT NULL,
+    segment_sequence INTEGER NOT NULL,
+    app_id INTEGER NOT NULL,
+    start_utc INTEGER NOT NULL,
+    end_utc INTEGER NOT NULL,
+    source_local_date INTEGER NOT NULL,
+    utc_offset_minutes INTEGER NOT NULL,
+    PRIMARY KEY(origin_device_id, segment_sequence),
+    FOREIGN KEY(origin_device_id) REFERENCES devices(device_id),
+    FOREIGN KEY(app_id) REFERENCES apps(id)
+) WITHOUT ROWID;
+CREATE INDEX idx_segments_date ON usage_segments(source_local_date);
+CREATE INDEX idx_segments_app ON usage_segments(app_id);
+
+CREATE TABLE hours_log (
+    app_id INTEGER NOT NULL,
+    source_local_date INTEGER NOT NULL,
+    local_hour INTEGER NOT NULL,
+    time INTEGER NOT NULL,
+    PRIMARY KEY(app_id, source_local_date, local_hour),
+    FOREIGN KEY(app_id) REFERENCES apps(id) ON DELETE CASCADE
+) WITHOUT ROWID;
+
+CREATE TABLE daily_log (
+    app_id INTEGER NOT NULL,
+    source_local_date INTEGER NOT NULL,
+    time INTEGER NOT NULL,
+    PRIMARY KEY(app_id, source_local_date),
+    FOREIGN KEY(app_id) REFERENCES apps(id) ON DELETE CASCADE
+) WITHOUT ROWID;
+
+CREATE TABLE sync_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at INTEGER NOT NULL,
+    year INTEGER NOT NULL,
+    success INTEGER NOT NULL,
+    uploaded_bytes INTEGER NOT NULL DEFAULT 0,
+    downloaded_bytes INTEGER NOT NULL DEFAULT 0,
+    imported_segments INTEGER NOT NULL DEFAULT 0,
+    duration_ms INTEGER NOT NULL DEFAULT 0,
+    error_summary TEXT
+);
+"#;
 
 const MIGRATION_V3: &str = r#"
 ALTER TABLE apps ADD COLUMN is_ignored INTEGER NOT NULL DEFAULT 0;
@@ -83,7 +177,41 @@ pub fn open(path: &Path) -> rusqlite::Result<Connection> {
         [],
     )?;
     migrate(&conn)?;
+    ensure_local_device(&conn)?;
     Ok(conn)
+}
+
+/// 返回本机不可变设备 ID；首次打开新 schema 时创建。
+pub fn local_device_id(conn: &Connection) -> rusqlite::Result<String> {
+    conn.query_row(
+        "SELECT value FROM config WHERE key = 'local_device_id'",
+        [],
+        |r| r.get(0),
+    )
+}
+
+fn ensure_local_device(conn: &Connection) -> rusqlite::Result<()> {
+    let existing = local_device_id(conn).ok();
+    let device_id = existing.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let display_name = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "Windows PC".to_string());
+    let tx = conn.unchecked_transaction()?;
+    tx.execute(
+        "INSERT OR IGNORE INTO config(key, value) VALUES ('local_device_id', ?1)",
+        [&device_id],
+    )?;
+    tx.execute(
+        "INSERT OR IGNORE INTO devices(device_id, display_name) VALUES (?1, ?2)",
+        rusqlite::params![device_id, display_name],
+    )?;
+    tx.execute(
+        "INSERT OR IGNORE INTO config(key, value) VALUES ('next_app_sequence', '1')",
+        [],
+    )?;
+    tx.execute(
+        "INSERT OR IGNORE INTO config(key, value) VALUES ('next_segment_sequence', '1')",
+        [],
+    )?;
+    tx.commit()
 }
 
 /// 当前 schema 版本。
@@ -127,12 +255,15 @@ mod tests {
     #[test]
     fn open_creates_full_schema() {
         let conn = open(Path::new(":memory:")).unwrap();
-        // apps / hours_log / daily_log / categories / config / schema_version = 6
-        assert_eq!(version(&conn).unwrap(), 3);
-        assert_eq!(table_count(&conn).unwrap(), 6);
+        assert_eq!(version(&conn).unwrap(), 4);
+        assert_eq!(table_count(&conn).unwrap(), 9);
         // 关键表与索引存在
         let has: bool = conn
-            .query_row("SELECT 1 FROM sqlite_master WHERE name='hours_log' AND type='table'", [], |_| Ok(true))
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE name='hours_log' AND type='table'",
+                [],
+                |_| Ok(true),
+            )
             .unwrap_or(false);
         assert!(has);
     }
@@ -142,26 +273,37 @@ mod tests {
         // 已是 v1 的库再跑 migrate 不应报错、版本不变。
         let conn = open(Path::new(":memory:")).unwrap();
         migrate(&conn).unwrap();
-        assert_eq!(version(&conn).unwrap(), 3);
+        assert_eq!(version(&conn).unwrap(), 4);
     }
 
     #[test]
-    fn migrates_v2_database_without_losing_apps() {
+    fn v4_replaces_legacy_usage_tables() {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(MIGRATION_V1).unwrap();
         conn.execute_batch(MIGRATION_V2).unwrap();
-        conn.execute("CREATE TABLE schema_version (version INTEGER PRIMARY KEY)", []).unwrap();
-        conn.execute("INSERT INTO schema_version(version) VALUES (1), (2)", []).unwrap();
-        conn.execute("INSERT INTO apps(process_name, total_time) VALUES ('demo.exe', 42)", []).unwrap();
+        conn.execute(
+            "CREATE TABLE schema_version (version INTEGER PRIMARY KEY)",
+            [],
+        )
+        .unwrap();
+        conn.execute("INSERT INTO schema_version(version) VALUES (1), (2)", [])
+            .unwrap();
+        conn.execute(
+            "INSERT INTO apps(process_name, total_time) VALUES ('demo.exe', 42)",
+            [],
+        )
+        .unwrap();
 
         migrate(&conn).unwrap();
 
-        let row: (i64, i64, Option<String>) = conn.query_row(
-            "SELECT total_time, is_ignored, custom_icon_path FROM apps WHERE process_name='demo.exe'",
-            [],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-        ).unwrap();
-        assert_eq!(version(&conn).unwrap(), 3);
-        assert_eq!(row, (42, 0, None));
+        assert_eq!(version(&conn).unwrap(), 4);
+        let old_app_exists: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM apps WHERE process_name='demo.exe')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(!old_app_exists);
     }
 }

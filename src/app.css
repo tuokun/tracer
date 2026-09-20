@@ -20,6 +20,11 @@
   --color-heatmap-high: #5048E5;
   --color-success: #4CAF50;
   --shadow-card: 0 2px 8px rgba(0,0,0,0.05);
+  --font-size-page-title: 0.85rem;
+  --font-size-dialog-title: 0.62rem;
+  --font-size-section-title: 0.55rem;
+  --font-size-body: 0.5rem;
+  --font-size-caption: 0.44rem;
 }
 
 .theme-pure {
